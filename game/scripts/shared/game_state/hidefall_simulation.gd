@@ -213,6 +213,31 @@ func shoot_object(object_id: String) -> Dictionary:
 	return {"accepted": true, "hit": false}
 
 
+func set_object_held(object_id: String, held: bool) -> bool:
+	if not objects.has(object_id):
+		return false
+	var obj: Dictionary = objects[object_id]
+	obj["held_by_seeker"] = held
+	if held:
+		obj["velocity"] = Vector3.ZERO
+	elif obj.get("is_hider", false) and obj.get("alive", false):
+		obj["inspected_survived"] = int(obj.get("inspected_survived", 0)) + 1
+	objects[object_id] = obj
+	return true
+
+
+func move_held_object(object_id: String, position: Vector3) -> bool:
+	if not objects.has(object_id):
+		return false
+	var obj: Dictionary = objects[object_id]
+	if not obj.get("held_by_seeker", false):
+		return false
+	obj["position"] = _clamp_to_play_area(position)
+	obj["velocity"] = Vector3.ZERO
+	objects[object_id] = obj
+	return true
+
+
 func get_state_snapshot(for_player_id: String = "") -> Dictionary:
 	var object_list: Array = []
 	for object_id in objects:

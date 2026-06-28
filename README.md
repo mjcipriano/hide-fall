@@ -27,12 +27,13 @@ Godot itself is installed by `make install-godot` into `tools/godot/` from the o
 make run
 ```
 
-The current executable scene is a desktop Godot prototype of the Quest host experience. It starts in a lobby, runs a WebSocket LAN host, shows a manual join payload, and begins a round when `R` is pressed.
+The current executable scene is a Godot prototype of the Quest host experience. It starts in a lobby, runs a WebSocket LAN host, shows a QR join code plus manual payload, and begins a round when `R` is pressed. On OpenXR-capable Quest runtime it initializes an `XROrigin3D`, headset camera, and controller nodes; on desktop/headless it falls back to a normal camera for local testing.
 
 Controls:
 
 - `R`: start/rematch from lobby.
-- Mouse click: shoot nearest centered prop.
+- Mouse click / right trigger: shoot along the seeker pointer ray.
+- `E` / right grip: pick up or drop the pointed-at prop.
 - `WASD`: local hider test movement.
 - `Space`: freeze local hider.
 - `C`: request next color for local hider.

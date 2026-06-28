@@ -4,6 +4,7 @@ const GameConfigScript := preload("res://scripts/shared/config/game_config.gd")
 const ContentDatabaseScript := preload("res://scripts/shared/content/content_database.gd")
 const HidefallSimulationScript := preload("res://scripts/shared/game_state/hidefall_simulation.gd")
 const NetworkMessageValidatorScript := preload("res://scripts/shared/networking/network_message_validator.gd")
+const QrCodeScript := preload("res://scripts/shared/qr/qr_code.gd")
 const WebSocketLanHostScript := preload("res://scripts/shared/networking/websocket_lan_host.gd")
 
 var simulation
@@ -20,10 +21,20 @@ var host_ip := "127.0.0.1"
 var snapshot_accumulator := 0.0
 var network_status := "offline"
 var auto_start_network := true
+var current_join_payload := ""
+var xr_runtime_status := "desktop"
+var held_object_id := ""
+var trigger_was_pressed := false
+var grip_was_pressed := false
 
 var camera: Camera3D
+var xr_origin: XROrigin3D
+var left_controller: XRController3D
+var right_controller: XRController3D
 var hud_label: Label
 var help_label: Label
+var qr_label: Label
+var qr_texture_rect: TextureRect
 var crosshair: ColorRect
 var arena_root: Node3D
 var object_root: Node3D
@@ -32,6 +43,7 @@ var object_root: Node3D
 func _ready() -> void:
 	if Engine.is_editor_hint() or DisplayServer.get_name() == "headless" or OS.get_environment("HIDEFALL_DISABLE_NETWORK") == "1":
 		auto_start_network = false
+	_setup_xr_runtime()
 	content = ContentDatabaseScript.new()
 	content.load_default()
 	config = GameConfigScript.new()
@@ -49,6 +61,9 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_handle_input()
+	_handle_xr_controller_buttons()
+	_update_seeker_pose()
+	_update_held_object()
 	simulation.advance(delta)
 	_send_periodic_snapshots(delta)
 	_update_objects()
@@ -66,6 +81,8 @@ func _exit_tree() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("shoot"):
 		_shoot_at_cursor()
+	if event.is_action_pressed("pickup"):
+		_toggle_pickup()
 
 
 func _build_world() -> void:
@@ -116,12 +133,13 @@ func _build_world() -> void:
 	fill.omni_range = 8.0
 	add_child(fill)
 
-	camera = Camera3D.new()
-	camera.name = "SeekerCamera"
-	camera.position = Vector3(0.0, 3.4, 6.2)
-	camera.rotation_degrees = Vector3(-32.0, 0.0, 0.0)
-	camera.current = true
-	add_child(camera)
+	if camera == null:
+		camera = Camera3D.new()
+		camera.name = "SeekerCamera"
+		camera.position = Vector3(0.0, 3.4, 6.2)
+		camera.rotation_degrees = Vector3(-32.0, 0.0, 0.0)
+		camera.current = true
+		add_child(camera)
 
 
 func _build_hud() -> void:
@@ -135,11 +153,26 @@ func _build_hud() -> void:
 	hud_label.add_theme_font_size_override("font_size", 22)
 	canvas.add_child(hud_label)
 
+	qr_label = Label.new()
+	qr_label.position = Vector2(812, 18)
+	qr_label.size = Vector2(260, 28)
+	qr_label.add_theme_font_size_override("font_size", 16)
+	qr_label.text = "Scan to join"
+	canvas.add_child(qr_label)
+
+	qr_texture_rect = TextureRect.new()
+	qr_texture_rect.name = "JoinQr"
+	qr_texture_rect.position = Vector2(812, 48)
+	qr_texture_rect.size = Vector2(228, 228)
+	qr_texture_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	qr_texture_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	canvas.add_child(qr_texture_rect)
+
 	help_label = Label.new()
 	help_label.position = Vector2(20, 580)
 	help_label.size = Vector2(900, 110)
 	help_label.add_theme_font_size_override("font_size", 16)
-	help_label.text = "R: start/rematch  |  Mouse click: shoot nearest prop  |  WASD: local hider move  |  Space: freeze  |  C: color  |  V: shape"
+	help_label.text = "R: start/rematch  |  Click/trigger: shoot  |  E/grip: pick up/drop  |  WASD: local hider  |  Space: freeze  |  C/V: disguise"
 	canvas.add_child(help_label)
 
 	crosshair = ColorRect.new()
@@ -224,8 +257,9 @@ func _update_hud() -> void:
 	if simulation.objects.has(local_object_id):
 		var obj: Dictionary = simulation.objects[local_object_id]
 		local_status = "alive" if obj.get("alive", false) else "found"
-	var join_payload := JSON.stringify(simulation.get_join_payload(host_ip, int(config.get_value("network", "port", 29444))))
-	hud_label.text = "Hidefall Host Prototype\nPhase: %s  Time: %.1f  Shots: %d  Live hiders: %d\nRoom: %s  Token: %s  Host: ws://%s:%d  Network: %s\nPlayers: %d  Local hider: %s  Objects: %d\nJoin payload: %s\n%s" % [
+	var join_payload := get_join_payload_text()
+	_update_join_qr(join_payload)
+	hud_label.text = "Hidefall Host Prototype\nPhase: %s  Time: %.1f  Shots: %d  Live hiders: %d\nRoom: %s  Token: %s  Host: ws://%s:%d  Network: %s  XR: %s\nPlayers: %d  Local hider: %s  Objects: %d  Held: %s\nScan QR or enter payload: %s\n%s" % [
 		snapshot["phase"],
 		float(snapshot["time_remaining"]),
 		int(snapshot["shots_remaining"]),
@@ -235,16 +269,31 @@ func _update_hud() -> void:
 		host_ip,
 		int(config.get_value("network", "port", 29444)),
 		network_status,
+		xr_runtime_status,
 		simulation.players.size(),
 		local_status,
 		simulation.objects.size(),
+		held_object_id if not held_object_id.is_empty() else "none",
 		join_payload,
 		_results_text(results)
 	]
 
 
+func get_join_payload_text() -> String:
+	return JSON.stringify(simulation.get_join_payload(host_ip, int(config.get_value("network", "port", 29444))))
+
+
+func _update_join_qr(join_payload: String) -> void:
+	if qr_texture_rect == null or join_payload == current_join_payload:
+		return
+	current_join_payload = join_payload
+	qr_texture_rect.texture = QrCodeScript.make_texture(join_payload, 5)
+
+
 func _shoot_at_cursor() -> void:
-	var object_id := _pick_object_near_screen_center()
+	if not held_object_id.is_empty():
+		return
+	var object_id := _pick_object_from_seeker_ray()
 	if object_id.is_empty():
 		return
 	var result = simulation.shoot_object(object_id)
@@ -255,21 +304,117 @@ func _shoot_at_cursor() -> void:
 			_flash_crosshair(Color(1.0, 0.25, 0.2, 1.0))
 
 
-func _pick_object_near_screen_center() -> String:
-	var viewport_size := get_viewport().get_visible_rect().size
-	var center := viewport_size * 0.5
+func _pick_object_from_seeker_ray(max_distance: float = 8.0, radius: float = 0.22) -> String:
+	var ray := _get_seeker_ray()
+	var origin: Vector3 = ray["origin"]
+	var direction: Vector3 = ray["direction"]
 	var best_id := ""
-	var best_score := 72.0
+	var best_score := max_distance
 	for object_id in simulation.objects:
 		var obj: Dictionary = simulation.objects[object_id]
 		if not obj.get("alive", true):
 			continue
-		var screen_position := camera.unproject_position(obj["position"])
-		var distance := screen_position.distance_to(center)
-		if distance < best_score:
-			best_score = distance
+		var to_object: Vector3 = obj["position"] - origin
+		var along_ray := to_object.dot(direction)
+		if along_ray < 0.0 or along_ray > max_distance:
+			continue
+		var closest_point := origin + direction * along_ray
+		var ray_distance := closest_point.distance_to(obj["position"])
+		if ray_distance <= radius and along_ray < best_score:
+			best_score = along_ray
 			best_id = object_id
 	return best_id
+
+
+func _toggle_pickup() -> void:
+	if not held_object_id.is_empty():
+		simulation.set_object_held(held_object_id, false)
+		held_object_id = ""
+		return
+	if simulation.phase != HidefallSimulationScript.PHASE_SEEK:
+		return
+	var object_id := _pick_object_from_seeker_ray(2.4, 0.32)
+	if object_id.is_empty():
+		return
+	if simulation.set_object_held(object_id, true):
+		held_object_id = object_id
+
+
+func _update_held_object() -> void:
+	if held_object_id.is_empty():
+		return
+	var ray := _get_seeker_ray()
+	var held_position: Vector3 = ray["origin"] + ray["direction"] * 0.65
+	if not simulation.move_held_object(held_object_id, held_position):
+		held_object_id = ""
+
+
+func _get_seeker_ray() -> Dictionary:
+	var source: Node3D = camera
+	if right_controller != null and right_controller.get_is_active():
+		source = right_controller
+	return {
+		"origin": source.global_transform.origin,
+		"direction": (-source.global_transform.basis.z).normalized()
+	}
+
+
+func _setup_xr_runtime() -> void:
+	if DisplayServer.get_name() == "headless":
+		xr_runtime_status = "headless"
+		return
+	var openxr = XRServer.find_interface("OpenXR")
+	if openxr == null:
+		xr_runtime_status = "OpenXR unavailable"
+		return
+	if not openxr.is_initialized():
+		var initialized: bool = openxr.initialize()
+		if not initialized:
+			xr_runtime_status = "OpenXR init failed"
+			return
+	get_viewport().use_xr = true
+	xr_runtime_status = "OpenXR"
+	xr_origin = XROrigin3D.new()
+	xr_origin.name = "XROrigin"
+	add_child(xr_origin)
+	camera = XRCamera3D.new()
+	camera.name = "XRCamera"
+	camera.current = true
+	xr_origin.add_child(camera)
+	left_controller = XRController3D.new()
+	left_controller.name = "LeftController"
+	left_controller.tracker = &"left_hand"
+	xr_origin.add_child(left_controller)
+	right_controller = XRController3D.new()
+	right_controller.name = "RightController"
+	right_controller.tracker = &"right_hand"
+	xr_origin.add_child(right_controller)
+
+
+func _update_seeker_pose() -> void:
+	if camera == null or simulation == null:
+		return
+	simulation.seeker_position = camera.global_transform.origin
+	simulation.seeker_forward = (-camera.global_transform.basis.z).normalized()
+
+
+func _handle_xr_controller_buttons() -> void:
+	if right_controller == null or not right_controller.get_is_active():
+		return
+	var trigger_pressed := _xr_button_pressed(right_controller, "trigger_click", "trigger")
+	var grip_pressed := _xr_button_pressed(right_controller, "grip_click", "grip")
+	if trigger_pressed and not trigger_was_pressed:
+		_shoot_at_cursor()
+	if grip_pressed and not grip_was_pressed:
+		_toggle_pickup()
+	trigger_was_pressed = trigger_pressed
+	grip_was_pressed = grip_pressed
+
+
+func _xr_button_pressed(controller: XRController3D, button_name: String, axis_name: String) -> bool:
+	if controller.is_button_pressed(button_name):
+		return true
+	return controller.get_float(axis_name) > 0.75
 
 
 func _mesh_for_shape(shape_id: String) -> Mesh:

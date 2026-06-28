@@ -58,14 +58,27 @@ This file is the handoff point for future agents. Keep it current before and aft
   - `conda run -n hidefall make test`
   - clean-config `conda run -n hidefall make build-apks`
   - APK signature verification for both debug APKs.
+- Implemented host lobby QR generation using an in-project Godot QR encoder; the host HUD now shows a scan-to-join QR texture and keeps the manual payload fallback.
+- Added runtime OpenXR scaffold for the Quest host scene:
+  - initializes OpenXR when available,
+  - creates `XROrigin3D`, `XRCamera3D`, and left/right `XRController3D` nodes,
+  - falls back to the desktop/headless camera path for local development and CI.
+- Reworked seeker interactions to use a 3D pointer ray from the right controller or fallback camera.
+- Added pickup/drop support:
+  - host can hold/drop pointed-at props,
+  - held hider input is blocked,
+  - held objects follow the seeker pointer,
+  - dropped live hiders receive an inspection-survived stat.
+- Re-verified locally at 2026-06-28T01:04:55-04:00:
+  - `conda run -n hidefall make test`
+  - `conda run -n hidefall make build-apks`
+  - APK signature verification for both debug APKs.
 
 ## Next
 
 1. Watch PR #1 GitHub Actions until the test and Android APK jobs pass.
 2. Confirm uploaded CI artifacts include `hidefall-quest-debug.apk` and `hidefall-mobile-debug.apk`.
-3. Replace the desktop seeker camera with OpenXR rig scaffolding and Quest runtime feature detection.
-4. Replace text-only join payload with an actual QR code texture in the host HUD.
-5. Add real 3D pickup/drop interactions and raycast shooting from controller/controller-sim transforms.
-6. Add release signing secrets and release workflow for signed release APKs/AABs.
-7. Expand simulation tests for disconnect/reconnect, late join, bot behavior, and 10-round soak runs.
-8. Test the debug APKs on physical Quest/Android/iOS devices.
+3. Add release signing secrets and release workflow for signed release APKs/AABs.
+4. Expand simulation tests for disconnect/reconnect, late join, bot behavior, and 10-round soak runs.
+5. Test the debug APKs on physical Quest/Android/iOS devices.
+6. Install and validate the Godot OpenXR Vendors plugin for Meta Quest passthrough/scene API support.

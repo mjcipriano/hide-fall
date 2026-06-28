@@ -7,5 +7,6 @@ Hidefall is split into four layers.
 3. Platform scenes: Quest/seeker host scenes and mobile/hider scenes in Godot.
 4. Networking: versioned WebSocket messages where the host is authoritative and clients send input requests only.
 
-The current implementation focuses on a playable Godot host prototype plus headless simulation coverage. Quest MR integration should wrap the same shared systems rather than replacing them.
+The Quest host scene initializes OpenXR at runtime when available and falls back to a desktop camera otherwise. Seeker actions are expressed as a pointer ray from the active right controller or camera, so shooting and pickup/drop share one interaction path across Quest and local tests.
 
+The lobby join flow generates a QR texture on-device from the current host IP, port, room ID, and token. The text payload remains visible as a manual fallback.

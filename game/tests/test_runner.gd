@@ -4,6 +4,7 @@ const GameConfigScript := preload("res://scripts/shared/config/game_config.gd")
 const ContentDatabaseScript := preload("res://scripts/shared/content/content_database.gd")
 const HidefallSimulationScript := preload("res://scripts/shared/game_state/hidefall_simulation.gd")
 const NetworkMessageValidatorScript := preload("res://scripts/shared/networking/network_message_validator.gd")
+const QrCodeScript := preload("res://scripts/shared/qr/qr_code.gd")
 const ScoreCalculatorScript := preload("res://scripts/shared/scoring/score_calculator.gd")
 const WebSocketLanHostScript := preload("res://scripts/shared/networking/websocket_lan_host.gd")
 
@@ -29,6 +30,7 @@ func _init() -> void:
 func _run() -> void:
 	Engine.max_fps = 0
 	_test_content_loads()
+	_test_qr_code_generation()
 	_test_network_validation()
 	_test_phase_transitions()
 	_test_hider_input_and_cooldowns()
@@ -63,6 +65,15 @@ func _test_content_loads() -> void:
 	_assert(int(config.get_value("objects", "decoy_count", 0)) == 75, "default decoy count loads")
 	_assert(content.get_shape_ids().size() >= 12, "MVP shape set loads")
 	_assert(content.get_color_ids().size() >= 12, "MVP color set loads")
+
+
+func _test_qr_code_generation() -> void:
+	var matrix := QrCodeScript.make_matrix('{"url":"ws://127.0.0.1:29444","room_id":"842913","token":"hidefall"}')
+	_assert(matrix.size() == QrCodeScript.SIZE, "QR matrix has expected height")
+	_assert(matrix[0].size() == QrCodeScript.SIZE, "QR matrix has expected width")
+	_assert(matrix[0][0] and matrix[6][6] and matrix[30][30], "QR function patterns render")
+	var texture := QrCodeScript.make_texture("hidefall", 2)
+	_assert(texture != null and texture.get_width() == (QrCodeScript.SIZE + 8) * 2, "QR texture renders with quiet zone")
 
 
 func _test_network_validation() -> void:
@@ -116,6 +127,11 @@ func _test_hider_input_and_cooldowns() -> void:
 	sim.apply_hider_input(player_id, {"move": [0, 0], "request_shape": "cone", "request_color": "red"})
 	_assert(sim.objects[object_id]["shape"] == "sphere", "shape cooldown blocks repeat change")
 	_assert(sim.objects[object_id]["color"] == "blue", "color cooldown blocks repeat change")
+	_assert(sim.set_object_held(object_id, true), "seeker can mark object held")
+	_assert(not sim.apply_hider_input(player_id, {"move": [1, 0]}), "held hider input is blocked")
+	_assert(sim.move_held_object(object_id, Vector3(0.2, 0.4, 0.2)), "held object can be moved by host")
+	_assert(sim.set_object_held(object_id, false), "seeker can drop held object")
+	_assert(int(sim.objects[object_id]["inspected_survived"]) == 1, "dropped live hider gets inspection stat")
 
 
 func _test_shooting_and_results() -> void:
@@ -156,6 +172,9 @@ func _test_host_scene_smoke() -> void:
 	await process_frame
 	_assert(scene.simulation != null, "host scene creates simulation")
 	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_LOBBY, "host scene starts in lobby")
+	scene._update_hud()
+	_assert(not scene.get_join_payload_text().is_empty(), "host scene creates join payload")
+	_assert(scene.qr_texture_rect.texture != null, "host scene creates join QR texture")
 	var fake_host := FakeNetworkHost.new()
 	scene.network_host = fake_host
 	scene._handle_join_request(7, {
@@ -168,8 +187,19 @@ func _test_host_scene_smoke() -> void:
 	_assert(scene.peer_to_player.has(7), "host accepts valid mobile join")
 	_assert(fake_host.sent[0]["message"]["type"] == "join_accepted", "host sends join acceptance")
 	scene.simulation.start_round()
+	_advance_for(scene.simulation, 20.4)
 	scene._rebuild_objects()
 	_assert(scene.object_nodes.size() >= 75, "host scene creates visible prop nodes")
+	var ray: Dictionary = scene._get_seeker_ray()
+	var pick_id: String = scene.simulation.get_decoy_object_ids()[0]
+	scene.simulation.objects[pick_id]["position"] = ray["origin"] + ray["direction"] * 1.0
+	_assert(scene._pick_object_from_seeker_ray() == pick_id, "host ray picks object")
+	scene._toggle_pickup()
+	_assert(scene.held_object_id == pick_id, "host pickup holds object")
+	scene._update_held_object()
+	_assert(scene.simulation.objects[pick_id]["held_by_seeker"], "host updates held object")
+	scene._toggle_pickup()
+	_assert(scene.held_object_id.is_empty(), "host pickup toggles drop")
 	root.remove_child(scene)
 	scene.free()
 	await process_frame
