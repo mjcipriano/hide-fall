@@ -206,6 +206,14 @@ func _test_host_scene_smoke() -> void:
 	_assert(fake_host.sent[0]["message"]["type"] == "join_accepted", "host sends join acceptance")
 	scene.simulation.start_round()
 	_advance_for(scene.simulation, 20.4)
+	scene._handle_join_request(8, {
+		"type": "join_request",
+		"version": 1,
+		"room_id": "842913",
+		"token": "hidefall",
+		"player_name": "Late"
+	})
+	_assert(fake_host.sent[-1]["message"]["reason"] == "round_in_progress", "host rejects default late join during round")
 	scene._rebuild_objects()
 	_assert(scene.object_nodes.size() >= 75, "host scene creates visible prop nodes")
 	var ray: Dictionary = scene._get_seeker_ray()
