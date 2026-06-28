@@ -1,0 +1,13 @@
+.godot/
+game/.godot/
+tools/godot/Godot_*
+tools/android-sdk/
+tools/android-keystore/*.keystore
+*.import
+*.tmp
+*.log
+export/
+build/
+dist/
+__pycache__/
+.pytest_cache/

@@ -1,0 +1,52 @@
+name: Test And Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: environment.yml
+          activate-environment: hidefall
+          auto-activate-base: false
+      - name: Install Godot
+        shell: bash -el {0}
+        run: make install-godot
+      - name: Run tests
+        shell: bash -el {0}
+        run: make test
+
+  android-apks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: environment.yml
+          activate-environment: hidefall
+          auto-activate-base: false
+      - name: Install Godot
+        shell: bash -el {0}
+        run: make install-godot
+      - name: Install Godot export templates
+        shell: bash -el {0}
+        run: make install-export-templates
+      - name: Install Android SDK
+        shell: bash -el {0}
+        run: make install-android-sdk
+      - name: Build APKs
+        shell: bash -el {0}
+        run: make build-apks
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hidefall-debug-apks
+          path: |
+            build/hidefall-quest-debug.apk
+            build/hidefall-mobile-debug.apk
+          if-no-files-found: error

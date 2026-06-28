@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3 uid="uid://hidefall_host_prototype"]
+
+[ext_resource type="Script" path="res://scripts/quest/seeker/host_prototype.gd" id="1_host"]
+
+[node name="HostPrototype" type="Node3D"]
+script = ExtResource("1_host")
+

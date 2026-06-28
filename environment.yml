@@ -1,0 +1,14 @@
+name: hidefall
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - nodejs=22
+  - openjdk=17
+  - unzip
+  - curl
+  - make
+  - jq
+  - pip
+  - pip:
+      - jsonschema==4.23.0

@@ -1,0 +1,39 @@
+{
+  "round": {
+    "object_rain_seconds": 10,
+    "blackout_seconds": 10,
+    "seek_seconds": 90,
+    "results_seconds": 15
+  },
+  "objects": {
+    "decoy_count": 75,
+    "max_decoy_count": 150,
+    "spawn_height_meters": 2.5,
+    "allow_large_objects": true,
+    "allow_rolling_objects": true
+  },
+  "seeker": {
+    "base_bullets": 3,
+    "bullets_per_hider": 1,
+    "allow_pickup": true,
+    "allow_throwing": true,
+    "scan_pulse_enabled": false,
+    "scan_pulse_count": 1
+  },
+  "hiders": {
+    "shape_change_cooldown": 12,
+    "color_change_cooldown": 6,
+    "movement_speed": 1.0,
+    "dash_enabled": true,
+    "abilities_enabled": false,
+    "cannot_move_while_held": true
+  },
+  "network": {
+    "max_hiders": 8,
+    "allow_late_join": false,
+    "transport": "websocket_lan",
+    "port": 29444,
+    "protocol_version": 1
+  }
+}
+
