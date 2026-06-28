@@ -83,10 +83,25 @@ This file is the handoff point for future agents. Keep it current before and aft
 - Verified CI-built APK signatures:
   - `/tmp/hidefall-ci-artifacts/hidefall-quest-debug.apk`
   - `/tmp/hidefall-ci-artifacts/hidefall-mobile-debug.apk`
+- User merged PR #1 into `master` and deleted the branch.
+- Pulled merged `master` locally.
+- Added `.github/workflows/release.yml` at 2026-06-28T13:30:44-04:00:
+  - triggers on version tags like `v0.1.0`,
+  - installs the same Godot/export template/Android SDK toolchain,
+  - runs tests,
+  - builds both debug APKs,
+  - verifies APK signatures,
+  - writes `SHA256SUMS`,
+  - creates a GitHub Release and attaches both APKs plus checksums.
+- Updated `BUILD_AND_RELEASE.md` with the tag-driven release process.
 
 ## Next
 
-1. Test the debug APKs on physical Quest/Android/iOS devices.
-2. Install and validate the Godot OpenXR Vendors plugin for Meta Quest passthrough/scene API support.
-3. Add release signing secrets and release workflow for signed release APKs/AABs.
-4. Expand simulation tests for reconnect and deeper bot behavior.
+1. Push the release workflow to `master`.
+2. Create and push tag `v0.1.0`.
+3. Watch the release workflow until it passes.
+4. Confirm GitHub Release `v0.1.0` exists and has `hidefall-quest-debug.apk`, `hidefall-mobile-debug.apk`, and `SHA256SUMS` attached.
+5. Test the debug APKs on physical Quest/Android/iOS devices.
+6. Install and validate the Godot OpenXR Vendors plugin for Meta Quest passthrough/scene API support.
+7. Add production release signing secrets/workflow for store-ready signed release APKs/AABs.
+8. Expand simulation tests for reconnect and deeper bot behavior.
