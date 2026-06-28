@@ -1,0 +1,15 @@
+[
+  {"id": "red", "display_name": "Red", "hex": "#ef4444", "colorblind_safe": false},
+  {"id": "blue", "display_name": "Blue", "hex": "#3b82f6", "colorblind_safe": true},
+  {"id": "green", "display_name": "Green", "hex": "#22c55e", "colorblind_safe": false},
+  {"id": "yellow", "display_name": "Yellow", "hex": "#facc15", "colorblind_safe": true},
+  {"id": "purple", "display_name": "Purple", "hex": "#a855f7", "colorblind_safe": true},
+  {"id": "orange", "display_name": "Orange", "hex": "#f97316", "colorblind_safe": true},
+  {"id": "pink", "display_name": "Pink", "hex": "#ec4899", "colorblind_safe": false},
+  {"id": "white", "display_name": "White", "hex": "#f8fafc", "colorblind_safe": true},
+  {"id": "black", "display_name": "Black", "hex": "#111827", "colorblind_safe": true},
+  {"id": "gray", "display_name": "Gray", "hex": "#94a3b8", "colorblind_safe": true},
+  {"id": "cyan", "display_name": "Cyan", "hex": "#06b6d4", "colorblind_safe": true},
+  {"id": "lime", "display_name": "Lime", "hex": "#84cc16", "colorblind_safe": true}
+]
+
