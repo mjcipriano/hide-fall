@@ -36,6 +36,7 @@ func _run() -> void:
 	_test_hider_input_and_cooldowns()
 	_test_shooting_and_results()
 	_test_timeout_results()
+	_test_disconnect_and_soak()
 	await _test_host_scene_smoke()
 	await _test_mobile_scene_smoke()
 	_test_websocket_host_instantiates()
@@ -159,6 +160,23 @@ func _test_timeout_results() -> void:
 	_assert(sim.phase == HidefallSimulationScript.PHASE_RESULTS, "seek timeout ends round")
 	var results := sim.get_results()
 	_assert(results["hiders"].values()[0] >= 1000, "surviving hider receives survival score")
+
+
+func _test_disconnect_and_soak() -> void:
+	var disconnect_sim = _new_sim(777)
+	var player_id := disconnect_sim.add_hider("Disconnect")
+	disconnect_sim.start_round()
+	_advance_for(disconnect_sim, 20.4)
+	var object_id: String = disconnect_sim.players[player_id]["object_id"]
+	_assert(disconnect_sim.remove_player(player_id, true), "disconnect removes player")
+	_assert(disconnect_sim.objects.has(object_id) and not disconnect_sim.objects[object_id]["is_hider"], "disconnect leaves inert decoy")
+	for round_index in 10:
+		var sim = _new_sim(900 + round_index)
+		sim.add_bot_hiders(3)
+		sim.start_round()
+		_advance_for(sim, 130.0)
+		_assert(sim.phase == HidefallSimulationScript.PHASE_RESULTS or sim.phase == HidefallSimulationScript.PHASE_LOBBY, "soak round %d reaches terminal phase" % (round_index + 1))
+		_assert(not sim.get_results().is_empty(), "soak round %d has results" % (round_index + 1))
 
 
 func _test_host_scene_smoke() -> void:
