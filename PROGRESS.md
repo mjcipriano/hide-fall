@@ -42,12 +42,25 @@ This file is the handoff point for future agents. Keep it current before and aft
 - Added docs: `README.md`, `ARCHITECTURE.md`, `NETWORK_PROTOCOL.md`, `TESTING.md`, `BUILD_AND_RELEASE.md`, `CONTENT_SCHEMA.md`, `AGENTS.md`.
 - Added `tools/validate_content.py`, `Makefile`, and GitHub Actions test workflow.
 - Verified locally with `conda run -n hidefall make test`.
+- Opened draft PR #1 from `codex/godot-hidefall-mvp`.
+- Fixed CI Android SDK bootstrap issues:
+  - SDK license acceptance no longer fails under `pipefail`,
+  - SDK package install verifies `adb` and `apksigner`,
+  - Android SDK paths are configured with absolute paths,
+  - Godot Android editor settings are written to both `editor_settings-4.tres` and `editor_settings-4.7.tres` for Godot 4.7.
+- Re-verified locally at 2026-06-28T00:52:20-04:00:
+  - `conda run -n hidefall make test`
+  - `conda run -n hidefall make build-apks GODOT_ENV='XDG_DATA_HOME=/tmp/hidefall-godot-data XDG_CONFIG_HOME=/tmp/hidefall-clean-config XDG_CACHE_HOME=/tmp/hidefall-godot-cache'`
+  - `tools/android-sdk/build-tools/35.0.0/apksigner verify --verbose build/hidefall-quest-debug.apk`
+  - `tools/android-sdk/build-tools/35.0.0/apksigner verify --verbose build/hidefall-mobile-debug.apk`
 
 ## Next
 
-1. Replace the desktop seeker camera with OpenXR rig scaffolding and Quest runtime feature detection.
-2. Replace text-only join payload with an actual QR code texture in the host HUD.
-3. Add real 3D pickup/drop interactions and raycast shooting from controller/controller-sim transforms.
-4. Add release signing secrets and release workflow for signed release APKs/AABs.
-5. Expand simulation tests for disconnect/reconnect, late join, bot behavior, and 10-round soak runs.
-6. Test the debug APKs on physical Quest/Android/iOS devices.
+1. Watch PR #1 GitHub Actions until the test and Android APK jobs pass.
+2. Confirm uploaded CI artifacts include `hidefall-quest-debug.apk` and `hidefall-mobile-debug.apk`.
+3. Replace the desktop seeker camera with OpenXR rig scaffolding and Quest runtime feature detection.
+4. Replace text-only join payload with an actual QR code texture in the host HUD.
+5. Add real 3D pickup/drop interactions and raycast shooting from controller/controller-sim transforms.
+6. Add release signing secrets and release workflow for signed release APKs/AABs.
+7. Expand simulation tests for disconnect/reconnect, late join, bot behavior, and 10-round soak runs.
+8. Test the debug APKs on physical Quest/Android/iOS devices.
