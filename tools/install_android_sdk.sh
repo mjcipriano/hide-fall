@@ -14,9 +14,10 @@ rm -rf "${CMDLINE_UNPACK}" "${ANDROID_SDK_ROOT}/cmdline-tools/latest"
 unzip -o "${CMDLINE_ZIP}" -d "${CMDLINE_UNPACK}"
 mv "${CMDLINE_UNPACK}/cmdline-tools" "${ANDROID_SDK_ROOT}/cmdline-tools/latest"
 
-yes | "${SDKMANAGER}" --sdk_root="${ANDROID_SDK_ROOT}" --licenses
+set +o pipefail
+yes | "${SDKMANAGER}" --sdk_root="${ANDROID_SDK_ROOT}" --licenses >/dev/null
+set -o pipefail
 "${SDKMANAGER}" --sdk_root="${ANDROID_SDK_ROOT}" \
   "platform-tools" \
   "platforms;android-35" \
   "build-tools;35.0.0"
-
