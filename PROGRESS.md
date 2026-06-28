@@ -127,6 +127,26 @@ This file is the handoff point for future agents. Keep it current before and aft
   - `conda run -n hidefall make build-apks`
   - `tools/android-sdk/build-tools/35.0.0/apksigner verify --verbose build/hidefall-quest-debug.apk`
   - `tools/android-sdk/build-tools/35.0.0/apksigner verify --verbose build/hidefall-mobile-debug.apk`
+- Committed and pushed the gameplay pass to `master` in commit `7297c03`.
+- Confirmed GitHub Actions Test And Build run `28336123902` passed for commit `7297c03`:
+  - `test` passed,
+  - `android-apks` passed,
+  - CI artifact upload completed.
+- Tagged and pushed `v0.2.0` for the gameplay pass.
+- Confirmed release workflow run `28336193586` passed for `v0.2.0`:
+  - tests passed,
+  - both APKs built,
+  - both APK signatures verified,
+  - checksums generated,
+  - GitHub Release created.
+- Confirmed tag-triggered Test And Build run `28336193595` passed for `v0.2.0`.
+- Confirmed GitHub Release `v0.2.0` exists:
+  - URL: https://github.com/mjcipriano/hide-fall/releases/tag/v0.2.0
+  - title: `Hidefall 0.2.0`
+  - attached assets: `hidefall-quest-debug.apk`, `hidefall-mobile-debug.apk`, `SHA256SUMS`.
+- Downloaded release assets to `/tmp/hidefall-release-v0.2.0` and verified:
+  - `sha256sum -c SHA256SUMS` passes,
+  - `apksigner verify --verbose` passes for both release APK assets.
 
 ## Next
 
