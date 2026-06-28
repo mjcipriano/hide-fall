@@ -13,6 +13,8 @@ var freeze_pressed := false
 var client
 var content
 var joined := false
+var player_ready := false
+var spectator := false
 var connection_status := "offline"
 var host_message := ""
 var input_accumulator := 0.0
@@ -38,6 +40,7 @@ var room_input: LineEdit
 var token_input: LineEdit
 var name_input: LineEdit
 var connect_button: Button
+var ready_button: Button
 
 const MAP_RECT := Rect2(16, 118, 760, 430)
 
@@ -114,6 +117,9 @@ func _build_ui() -> void:
 	name_input = _make_line_edit("Hider", Vector2(514, 52), Vector2(120, 34))
 	connect_button = _make_button("Join", Vector2(648, 50), Vector2(128, 38))
 	connect_button.pressed.connect(_on_join_pressed)
+	ready_button = _make_button("Ready", Vector2(830, 50), Vector2(160, 54))
+	ready_button.disabled = true
+	ready_button.pressed.connect(_on_ready_pressed)
 
 	joystick = ColorRect.new()
 	joystick.color = Color(0.2, 0.45, 1.0, 0.7)
@@ -169,9 +175,10 @@ func _update_status() -> void:
 	var shape_text: String = hider_state.get("shape", "-")
 	var color_text: String = hider_state.get("color", "-")
 	var cooldown_text := "shape %.1f / color %.1f" % [float(cooldowns.get("shape", 0.0)), float(cooldowns.get("color", 0.0))]
-	status_label.text = "Hidefall Hider | %s | Phase: %s | Danger: %s | %s %s | %s | %s" % [
+	status_label.text = "Hidefall Hider | %s | Phase: %s | %s | Danger: %s | %s %s | %s | %s" % [
 		connection_status,
 		current_phase,
+		"SPECTATOR" if spectator else ("READY" if player_ready else "NOT READY"),
 		danger,
 		shape_text,
 		color_text,
@@ -215,6 +222,11 @@ func _on_join_pressed() -> void:
 	if player_name.is_empty():
 		player_name = "Hider"
 	connection_status = "connecting"
+	player_ready = false
+	spectator = false
+	if ready_button != null:
+		ready_button.disabled = true
+		ready_button.text = "Ready"
 	host_message = ""
 	_update_status()
 	var error: Error = client.connect_to_host(host_input.text.strip_edges(), int(port_input.text))
@@ -237,14 +249,20 @@ func _on_connected() -> void:
 
 func _on_disconnected() -> void:
 	joined = false
+	player_ready = false
 	connection_status = "disconnected"
 	current_phase = "disconnected"
+	if ready_button != null:
+		ready_button.disabled = true
 	_update_status()
 
 
 func _on_connection_failed() -> void:
 	joined = false
+	player_ready = false
 	connection_status = "connection failed"
+	if ready_button != null:
+		ready_button.disabled = true
 	_update_status()
 
 
@@ -252,10 +270,15 @@ func _on_message_received(message: Dictionary) -> void:
 	match message.get("type", ""):
 		"join_accepted":
 			player_id = message.get("player_id", "")
+			spectator = bool(message.get("spectator", false))
 			available_shapes = message.get("shapes", available_shapes)
 			available_colors = message.get("colors", available_colors)
 			joined = true
+			player_ready = false
 			connection_status = "joined as %s" % player_id
+			if ready_button != null:
+				ready_button.disabled = spectator
+				ready_button.text = "Spectator" if spectator else "Ready"
 		"join_rejected":
 			joined = false
 			host_message = "%s: %s" % [message.get("reason", "rejected"), message.get("detail", "")]
@@ -281,3 +304,17 @@ func _request_next_shape() -> void:
 		return
 	selected_shape_index = (selected_shape_index + 1) % available_shapes.size()
 	pending_shape = available_shapes[selected_shape_index]
+
+
+func _on_ready_pressed() -> void:
+	if not joined or player_id.is_empty() or spectator:
+		return
+	player_ready = not player_ready
+	ready_button.text = "Unready" if player_ready else "Ready"
+	client.send_message({
+		"type": "ready_state",
+		"version": NetworkMessageValidatorScript.PROTOCOL_VERSION,
+		"player_id": player_id,
+		"ready": player_ready
+	})
+	_update_status()

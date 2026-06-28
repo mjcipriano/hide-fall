@@ -27,13 +27,16 @@ Godot itself is installed by `make install-godot` into `tools/godot/` from the o
 make run
 ```
 
-The current executable scene is a Godot prototype of the Quest host experience. It starts in a lobby, runs a WebSocket LAN host, shows a QR join code plus manual payload, and begins a round when `R` is pressed. On OpenXR-capable Quest runtime it initializes an `XROrigin3D`, headset camera, and controller nodes; on desktop/headless it falls back to a normal camera for local testing.
+The current executable scene is a Godot prototype of the Quest host experience. It starts in a lobby, runs a WebSocket LAN host, shows a QR join code plus manual payload, waits for joined hiders to ready up, and begins a round when `R` is pressed. On OpenXR-capable Quest runtime it initializes an `XROrigin3D`, headset camera, and controller nodes; on desktop/headless it falls back to a normal camera for local testing.
+
+Implemented gameplay includes lobby ready gating, room setup confirmation, object rain, blackout, seek, results/rematch, hider movement and freeze, shape/color disguise changes, bot hider behavior, pickup/drop inspection, limited seeker shots, a limited scan pulse, late-join spectators, scoring, and LAN phone client snapshots.
 
 Controls:
 
-- `R`: start/rematch from lobby.
+- `R`: start/rematch from lobby or confirm room setup.
 - Mouse click / right trigger: shoot along the seeker pointer ray.
 - `E` / right grip: pick up or drop the pointed-at prop.
+- `Q` / Quest primary face button: use a scan pulse during the seek phase.
 - `WASD`: local hider test movement.
 - `Space`: freeze local hider.
 - `C`: request next color for local hider.
@@ -47,8 +50,10 @@ The Godot mobile hider scene is `res://scenes/mobile/hider_client.tscn`. It incl
 - WebSocket connection and join request.
 - Periodic hider input messages.
 - Freeze, color, and shape controls.
+- Ready/unready control before the round starts.
 - Top-down map rendering from authoritative snapshots.
 - Danger, cooldown, phase, and hider status display.
+- Spectator status for late joins after a round starts.
 
 It is functional as a Godot client scene. A debug Android APK export preset is included.
 

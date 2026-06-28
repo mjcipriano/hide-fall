@@ -21,7 +21,7 @@ GitHub Actions runs tests and builds both debug APKs, then uploads them as the `
 
 ## GitHub Releases
 
-Versioned releases are created from tags named `vX.Y.Z`.
+Versioned releases are created from tags named `vX.Y.Z`. Use a new tag for each published build; do not move an existing release tag.
 
 ```bash
 git tag -a v0.1.0 -m "Hidefall 0.1.0"

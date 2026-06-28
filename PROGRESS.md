@@ -113,10 +113,25 @@ This file is the handoff point for future agents. Keep it current before and aft
   - `sha256sum -c SHA256SUMS` passes,
   - `apksigner verify --verbose` passes for both release APK assets.
 - Confirmed normal `master` Test And Build workflow is green for commit `c51f0bf` in run `28330452425`.
+- Continued gameplay completion pass after user asked whether all features were implemented:
+  - Added ready-gated round start for active hider players.
+  - Added mobile ready/unready button and `ready_state` client message handling.
+  - Added room setup phase before object rain and `R` confirmation on the host.
+  - Added late-join spectator acceptance instead of hard rejection once a round is in progress.
+  - Added seeker scan pulse state, host input binding, HUD feedback, and reveal/decrement simulation behavior.
+  - Added autonomous bot hider decision updates so bot rounds move without phone input.
+  - Updated snapshots and lobby data with scan pulse and spectator state.
+  - Expanded Godot tests for room setup config, ready gates, scan pulse, bot decisions, host spectator joins, host scan pulse, and mobile ready behavior.
+- Re-verified locally at 2026-06-28 after the gameplay pass:
+  - `conda run -n hidefall make test`
+  - `conda run -n hidefall make build-apks`
+  - `tools/android-sdk/build-tools/35.0.0/apksigner verify --verbose build/hidefall-quest-debug.apk`
+  - `tools/android-sdk/build-tools/35.0.0/apksigner verify --verbose build/hidefall-mobile-debug.apk`
 
 ## Next
 
 1. Test the debug APKs on physical Quest/Android/iOS devices.
 2. Install and validate the Godot OpenXR Vendors plugin for Meta Quest passthrough/scene API support.
 3. Add production release signing secrets/workflow for store-ready signed release APKs/AABs.
-4. Expand simulation tests for reconnect and deeper bot behavior.
+4. Expand simulation tests for reconnect behavior, network interruptions, and deeper bot behavior.
+5. Replace desktop/fallback room approximation with validated Quest room mesh, boundary, passthrough, and scene API behavior after plugin/device verification.

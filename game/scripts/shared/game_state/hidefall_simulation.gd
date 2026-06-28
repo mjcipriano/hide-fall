@@ -19,6 +19,7 @@ var phase := PHASE_LOBBY
 var phase_elapsed := 0.0
 var server_tick := 0
 var shots_remaining := 0
+var scan_pulses_remaining := 0
 var room_id := "842913"
 var room_token := "hidefall"
 var seeker_position := Vector3.ZERO
@@ -50,6 +51,7 @@ func _reset_session_state() -> void:
 	phase_elapsed = 0.0
 	server_tick = 0
 	shots_remaining = 0
+	scan_pulses_remaining = 0
 	players.clear()
 	objects.clear()
 	scores.clear()
@@ -57,6 +59,7 @@ func _reset_session_state() -> void:
 		"correct_shots": 0,
 		"wrong_shots": 0,
 		"shots_fired": 0,
+		"scan_pulses_used": 0,
 		"all_hiders_found": false,
 		"time_bonus": 0.0
 	}
@@ -74,6 +77,22 @@ func add_hider(player_name: String, is_bot: bool = false) -> String:
 		"ready": true,
 		"is_bot": is_bot,
 		"alive": true,
+		"object_id": "",
+		"score": 0
+	}
+	return player_id
+
+
+func add_spectator(player_name: String) -> String:
+	var player_id := "p%d" % _next_player_index
+	_next_player_index += 1
+	players[player_id] = {
+		"id": player_id,
+		"name": player_name,
+		"role": "spectator",
+		"ready": false,
+		"is_bot": false,
+		"alive": false,
 		"object_id": "",
 		"score": 0
 	}
@@ -100,6 +119,9 @@ func set_player_ready(player_id: String, ready: bool) -> bool:
 	if not players.has(player_id):
 		return false
 	players[player_id]["ready"] = ready
+	if phase == PHASE_LOBBY and players[player_id].get("role", "") == "spectator" and ready:
+		players[player_id]["role"] = "hider"
+		players[player_id]["alive"] = true
 	return true
 
 
@@ -110,24 +132,49 @@ func add_bot_hiders(count: int) -> Array[String]:
 	return ids
 
 
-func start_round() -> void:
+func can_start_round() -> bool:
 	if players.is_empty():
+		return true
+	for player_id in players:
+		var player: Dictionary = players[player_id]
+		if player.get("role", "") == "hider" and not player.get("ready", false):
+			return false
+	return true
+
+
+func start_round() -> bool:
+	if not can_start_round():
+		return false
+	if _active_hider_player_ids().is_empty():
 		add_bot_hiders(1)
 	objects.clear()
 	_next_object_index = 1
 	for player_id in players:
-		players[player_id]["alive"] = true
-		players[player_id]["object_id"] = ""
-		players[player_id]["score"] = 0
+		if players[player_id].get("role", "") == "spectator" and players[player_id].get("ready", false):
+			players[player_id]["role"] = "hider"
+		if players[player_id].get("role", "") == "hider":
+			players[player_id]["alive"] = true
+			players[player_id]["object_id"] = ""
+			players[player_id]["score"] = 0
 	_spawn_decoys()
 	_spawn_hiders()
 	shots_remaining = _calculate_bullets()
+	scan_pulses_remaining = int(config.get_value("seeker", "scan_pulse_count", 1)) if bool(config.get_value("seeker", "scan_pulse_enabled", true)) else 0
 	stats["correct_shots"] = 0
 	stats["wrong_shots"] = 0
 	stats["shots_fired"] = 0
+	stats["scan_pulses_used"] = 0
 	stats["all_hiders_found"] = false
 	stats["time_bonus"] = 0.0
+	_set_phase(PHASE_ROOM_SETUP if float(config.get_value("round", "room_setup_seconds", 5.0)) > 0.0 else PHASE_OBJECT_RAIN)
+	return true
+
+
+func confirm_room_setup() -> bool:
+	if phase != PHASE_ROOM_SETUP:
+		return false
 	_set_phase(PHASE_OBJECT_RAIN)
+	return true
 
 
 func advance(delta: float) -> void:
@@ -135,14 +182,19 @@ func advance(delta: float) -> void:
 	phase_elapsed += delta
 	_update_hider_scores(delta)
 	match phase:
+		PHASE_ROOM_SETUP:
+			if phase_elapsed >= float(config.get_value("round", "room_setup_seconds", 5.0)):
+				_set_phase(PHASE_OBJECT_RAIN)
 		PHASE_OBJECT_RAIN:
 			_integrate_object_rain(delta)
 			if phase_elapsed >= float(config.get_value("round", "object_rain_seconds", 10.0)):
 				_set_phase(PHASE_BLACKOUT)
 		PHASE_BLACKOUT:
+			_update_bot_inputs(delta)
 			if phase_elapsed >= float(config.get_value("round", "blackout_seconds", 10.0)):
 				_set_phase(PHASE_SEEK)
 		PHASE_SEEK:
+			_update_bot_inputs(delta)
 			_integrate_hider_motion(delta)
 			if _live_hider_count() == 0:
 				stats["all_hiders_found"] = true
@@ -213,6 +265,25 @@ func shoot_object(object_id: String) -> Dictionary:
 	return {"accepted": true, "hit": false}
 
 
+func use_scan_pulse(origin: Vector3, radius: float = 1.35) -> Dictionary:
+	if phase != PHASE_SEEK:
+		return {"accepted": false, "reason": "not_seek_phase", "revealed": []}
+	if scan_pulses_remaining <= 0:
+		return {"accepted": false, "reason": "no_scan_pulses_remaining", "revealed": []}
+	scan_pulses_remaining -= 1
+	stats["scan_pulses_used"] = int(stats.get("scan_pulses_used", 0)) + 1
+	var revealed: Array = []
+	for object_id in objects:
+		var obj: Dictionary = objects[object_id]
+		if obj.get("is_hider", false) and obj.get("alive", false) and obj.get("position", Vector3.ZERO).distance_to(origin) <= radius:
+			revealed.append({
+				"object_id": object_id,
+				"player_id": obj.get("owner_player_id", ""),
+				"distance": obj.get("position", Vector3.ZERO).distance_to(origin)
+			})
+	return {"accepted": true, "revealed": revealed, "radius": radius}
+
+
 func set_object_held(object_id: String, held: bool) -> bool:
 	if not objects.has(object_id):
 		return false
@@ -255,10 +326,11 @@ func get_state_snapshot(for_player_id: String = "") -> Dictionary:
 		"type": "state_snapshot",
 		"version": NetworkMessageValidatorScript.PROTOCOL_VERSION,
 		"server_tick": server_tick,
-		"phase": phase,
-		"time_remaining": _time_remaining(),
-		"shots_remaining": shots_remaining,
-		"players": players.values(),
+			"phase": phase,
+			"time_remaining": _time_remaining(),
+			"shots_remaining": shots_remaining,
+			"scan_pulses_remaining": scan_pulses_remaining,
+			"players": players.values(),
 		"objects": object_list,
 		"hider_state": get_hider_state(for_player_id),
 		"danger": get_danger_for_player(for_player_id),
@@ -373,6 +445,8 @@ func _spawn_decoys() -> void:
 
 func _spawn_hiders() -> void:
 	for player_id in players:
+		if players[player_id].get("role", "") != "hider":
+			continue
 		var object_id := _create_object(true, player_id)
 		players[player_id]["object_id"] = object_id
 
@@ -403,9 +477,30 @@ func _create_object(is_hider: bool, owner_player_id: String) -> String:
 		"alive_time": 0.0,
 		"freeze_near_seconds": 0.0,
 		"close_calls": 0,
-		"inspected_survived": 0
+		"inspected_survived": 0,
+		"bot_decision_time": 0.0
 	}
 	return object_id
+
+
+func _update_bot_inputs(delta: float) -> void:
+	for player_id in players:
+		var player: Dictionary = players[player_id]
+		if not player.get("is_bot", false) or not player.get("alive", false):
+			continue
+		var object_id: String = player.get("object_id", "")
+		if object_id.is_empty() or not objects.has(object_id):
+			continue
+		var obj: Dictionary = objects[object_id]
+		var decision_time := float(obj.get("bot_decision_time", 0.0)) - delta
+		if decision_time <= 0.0:
+			var direction := Vector2(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0)).limit_length(1.0)
+			obj["move_input"] = direction if rng.randf() > 0.28 else Vector2.ZERO
+			obj["freeze"] = rng.randf() < 0.35
+			obj["bot_decision_time"] = float(config.get_value("hiders", "bot_decision_seconds", 1.6)) * rng.randf_range(0.7, 1.4)
+		else:
+			obj["bot_decision_time"] = decision_time
+		objects[object_id] = obj
 
 
 func _integrate_object_rain(delta: float) -> void:
@@ -478,7 +573,7 @@ func _try_change_color(obj: Dictionary, color_id: String) -> void:
 
 
 func _calculate_bullets() -> int:
-	var hider_count := players.size()
+	var hider_count := _active_hider_player_ids().size()
 	if hider_count <= 1:
 		return int(config.get_value("seeker", "base_bullets", 3))
 	return int(config.get_value("seeker", "base_bullets", 3)) + hider_count * int(config.get_value("seeker", "bullets_per_hider", 1))
@@ -521,6 +616,8 @@ func _live_hider_count() -> int:
 func _time_remaining() -> float:
 	var duration := 0.0
 	match phase:
+		PHASE_ROOM_SETUP:
+			duration = float(config.get_value("round", "room_setup_seconds", 5.0))
 		PHASE_OBJECT_RAIN:
 			duration = float(config.get_value("round", "object_rain_seconds", 10.0))
 		PHASE_BLACKOUT:
@@ -543,3 +640,11 @@ func _clamp_to_play_area(position: Vector3) -> Vector3:
 
 func _vector3_to_array(value: Vector3) -> Array[float]:
 	return [value.x, value.y, value.z]
+
+
+func _active_hider_player_ids() -> Array[String]:
+	var ids: Array[String] = []
+	for player_id in players:
+		if players[player_id].get("role", "") == "hider":
+			ids.append(player_id)
+	return ids

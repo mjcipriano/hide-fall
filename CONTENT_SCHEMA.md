@@ -14,6 +14,27 @@ Top-level keys:
 
 Durations are seconds. Object counts are integers. Cooldowns are seconds.
 
+Currently used gameplay settings include:
+
+- `round.object_rain_seconds`
+- `round.room_setup_seconds`
+- `round.blackout_seconds`
+- `round.seek_seconds`
+- `round.results_seconds`
+- `round.max_hiders`
+- `objects.decoy_count`
+- `seeker.bullets_base`
+- `seeker.bullets_per_hider`
+- `seeker.scan_pulse_enabled`
+- `seeker.scan_pulse_count`
+- `hiders.move_speed`
+- `hiders.freeze_bonus_seconds`
+- `hiders.shape_change_cooldown`
+- `hiders.color_change_cooldown`
+- `hiders.bot_decision_seconds`
+- `network.default_port`
+- `network.allow_late_join`
+
 ## `objects/shapes.json`
 
 Array of shape definitions:
@@ -35,4 +56,3 @@ Array of colors:
 - `display_name`: UI label.
 - `hex`: `#RRGGBB`.
 - `colorblind_safe`: boolean.
-

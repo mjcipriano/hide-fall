@@ -34,9 +34,9 @@ func duplicate_data() -> Dictionary:
 func _apply_defaults() -> void:
 	if data.is_empty():
 		data = {
-			"round": {"object_rain_seconds": 10, "blackout_seconds": 10, "seek_seconds": 90, "results_seconds": 15},
+			"round": {"room_setup_seconds": 5, "object_rain_seconds": 10, "blackout_seconds": 10, "seek_seconds": 90, "results_seconds": 15},
 			"objects": {"decoy_count": 75, "max_decoy_count": 150, "spawn_height_meters": 2.5},
-			"seeker": {"base_bullets": 3, "bullets_per_hider": 1},
-			"hiders": {"shape_change_cooldown": 12, "color_change_cooldown": 6, "movement_speed": 1.0},
-			"network": {"max_hiders": 8, "transport": "websocket_lan", "protocol_version": 1}
+			"seeker": {"base_bullets": 3, "bullets_per_hider": 1, "scan_pulse_enabled": true, "scan_pulse_count": 1},
+			"hiders": {"shape_change_cooldown": 12, "color_change_cooldown": 6, "movement_speed": 1.0, "bot_decision_seconds": 1.6},
+			"network": {"max_hiders": 8, "allow_late_join": false, "transport": "websocket_lan", "protocol_version": 1}
 		}

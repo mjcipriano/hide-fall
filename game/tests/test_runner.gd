@@ -64,6 +64,8 @@ func _test_content_loads() -> void:
 	var content = ContentDatabaseScript.new()
 	content.load_default()
 	_assert(int(config.get_value("objects", "decoy_count", 0)) == 75, "default decoy count loads")
+	_assert(int(config.get_value("round", "room_setup_seconds", 0)) == 5, "room setup duration loads")
+	_assert(bool(config.get_value("seeker", "scan_pulse_enabled", false)), "scan pulse is enabled in default config")
 	_assert(content.get_shape_ids().size() >= 12, "MVP shape set loads")
 	_assert(content.get_color_ids().size() >= 12, "MVP color set loads")
 
@@ -98,7 +100,9 @@ func _test_network_validation() -> void:
 func _test_phase_transitions() -> void:
 	var sim = _new_sim()
 	sim.add_bot_hiders(1)
-	sim.start_round()
+	_assert(sim.start_round(), "ready players can start round")
+	_assert(sim.phase == HidefallSimulationScript.PHASE_ROOM_SETUP, "round starts in room setup")
+	_assert(sim.confirm_room_setup(), "room setup can be confirmed")
 	_assert(sim.phase == HidefallSimulationScript.PHASE_OBJECT_RAIN, "round starts in object rain")
 	_advance_for(sim, 10.2)
 	_assert(sim.phase == HidefallSimulationScript.PHASE_BLACKOUT, "object rain transitions to blackout")
@@ -110,6 +114,7 @@ func _test_hider_input_and_cooldowns() -> void:
 	var sim = _new_sim(123)
 	var player_id := sim.add_hider("Tester")
 	sim.start_round()
+	sim.confirm_room_setup()
 	_advance_for(sim, 20.4)
 	var object_id: String = sim.players[player_id]["object_id"]
 	var old_position: Vector3 = sim.objects[object_id]["position"]
@@ -133,12 +138,18 @@ func _test_hider_input_and_cooldowns() -> void:
 	_assert(sim.move_held_object(object_id, Vector3(0.2, 0.4, 0.2)), "held object can be moved by host")
 	_assert(sim.set_object_held(object_id, false), "seeker can drop held object")
 	_assert(int(sim.objects[object_id]["inspected_survived"]) == 1, "dropped live hider gets inspection stat")
+	sim.objects[object_id]["position"] = Vector3.ZERO
+	var scan := sim.use_scan_pulse(Vector3.ZERO, 1.0)
+	_assert(scan.get("accepted", false), "scan pulse is accepted during seek")
+	_assert(scan.get("revealed", []).size() == 1, "scan pulse reveals nearby hider")
+	_assert(sim.scan_pulses_remaining == 0, "scan pulse decrements remaining count")
 
 
 func _test_shooting_and_results() -> void:
 	var sim = _new_sim(321)
 	var player_id := sim.add_hider("Target")
 	sim.start_round()
+	sim.confirm_room_setup()
 	_advance_for(sim, 20.4)
 	var hider_object_id: String = sim.players[player_id]["object_id"]
 	var result := sim.shoot_object(hider_object_id)
@@ -152,6 +163,7 @@ func _test_timeout_results() -> void:
 	var sim = _new_sim(555)
 	sim.add_hider("Survivor")
 	sim.start_round()
+	sim.confirm_room_setup()
 	_advance_for(sim, 20.4)
 	var decoy_id := sim.get_decoy_object_ids()[0]
 	var wrong := sim.shoot_object(decoy_id)
@@ -166,6 +178,7 @@ func _test_disconnect_and_soak() -> void:
 	var disconnect_sim = _new_sim(777)
 	var player_id := disconnect_sim.add_hider("Disconnect")
 	disconnect_sim.start_round()
+	disconnect_sim.confirm_room_setup()
 	_advance_for(disconnect_sim, 20.4)
 	var object_id: String = disconnect_sim.players[player_id]["object_id"]
 	_assert(disconnect_sim.remove_player(player_id, true), "disconnect removes player")
@@ -174,9 +187,23 @@ func _test_disconnect_and_soak() -> void:
 		var sim = _new_sim(900 + round_index)
 		sim.add_bot_hiders(3)
 		sim.start_round()
+		sim.confirm_room_setup()
 		_advance_for(sim, 130.0)
 		_assert(sim.phase == HidefallSimulationScript.PHASE_RESULTS or sim.phase == HidefallSimulationScript.PHASE_LOBBY, "soak round %d reaches terminal phase" % (round_index + 1))
 		_assert(not sim.get_results().is_empty(), "soak round %d has results" % (round_index + 1))
+	var ready_sim = _new_sim(42)
+	var waiting_id := ready_sim.add_hider("Waiting")
+	ready_sim.set_player_ready(waiting_id, false)
+	_assert(not ready_sim.start_round(), "unready hider blocks round start")
+	ready_sim.set_player_ready(waiting_id, true)
+	_assert(ready_sim.start_round(), "ready hider allows round start")
+	var bot_sim = _new_sim(43)
+	bot_sim.add_bot_hiders(1)
+	bot_sim.start_round()
+	bot_sim.confirm_room_setup()
+	_advance_for(bot_sim, 10.2)
+	var bot_object_id: String = bot_sim.players[bot_sim.players.keys()[0]]["object_id"]
+	_assert(bot_sim.objects[bot_object_id]["move_input"].length() >= 0.0 and bot_sim.objects[bot_object_id].has("bot_decision_time"), "bot hider receives autonomous decisions")
 
 
 func _test_host_scene_smoke() -> void:
@@ -204,7 +231,10 @@ func _test_host_scene_smoke() -> void:
 	})
 	_assert(scene.peer_to_player.has(7), "host accepts valid mobile join")
 	_assert(fake_host.sent[0]["message"]["type"] == "join_accepted", "host sends join acceptance")
+	_assert(not scene.simulation.can_start_round(), "joined mobile hider must ready before round start")
+	scene.simulation.set_player_ready(scene.peer_to_player[7], true)
 	scene.simulation.start_round()
+	scene.simulation.confirm_room_setup()
 	_advance_for(scene.simulation, 20.4)
 	scene._handle_join_request(8, {
 		"type": "join_request",
@@ -213,7 +243,7 @@ func _test_host_scene_smoke() -> void:
 		"token": "hidefall",
 		"player_name": "Late"
 	})
-	_assert(fake_host.sent[-1]["message"]["reason"] == "round_in_progress", "host rejects default late join during round")
+	_assert(fake_host.sent[-2]["message"]["type"] == "join_accepted" and fake_host.sent[-2]["message"]["spectator"], "host accepts default late join as spectator")
 	scene._rebuild_objects()
 	_assert(scene.object_nodes.size() >= 75, "host scene creates visible prop nodes")
 	var ray: Dictionary = scene._get_seeker_ray()
@@ -226,6 +256,9 @@ func _test_host_scene_smoke() -> void:
 	_assert(scene.simulation.objects[pick_id]["held_by_seeker"], "host updates held object")
 	scene._toggle_pickup()
 	_assert(scene.held_object_id.is_empty(), "host pickup toggles drop")
+	var scan_before: int = scene.simulation.scan_pulses_remaining
+	scene._use_scan_pulse()
+	_assert(scene.simulation.scan_pulses_remaining == max(0, scan_before - 1), "host scan pulse consumes pulse")
 	root.remove_child(scene)
 	scene.free()
 	await process_frame
@@ -243,9 +276,12 @@ func _test_mobile_scene_smoke() -> void:
 		"version": 1,
 		"player_id": "p1",
 		"room_id": "842913",
+		"spectator": false,
 		"shapes": ["cube", "sphere"],
 		"colors": ["red", "blue"]
 	})
+	scene._on_ready_pressed()
+	_assert(scene.player_ready, "mobile ready button toggles ready")
 	scene.player_id = "p1"
 	scene._request_next_color()
 	scene._request_next_shape()

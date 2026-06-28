@@ -33,6 +33,15 @@ Clients send input and requests. The host owns physics, phase transitions, hit d
 }
 ```
 
+```json
+{
+  "type": "ready_state",
+  "version": 1,
+  "player_id": "p3",
+  "ready": true
+}
+```
+
 ## Host Messages
 
 ```json
@@ -43,6 +52,7 @@ Clients send input and requests. The host owns physics, phase transitions, hit d
   "phase": "seek",
   "time_remaining": 81.2,
   "shots_remaining": 5,
+  "scan_pulses_remaining": 1,
   "hider_state": {},
   "nearby_objects": [],
   "danger": "watched",
@@ -56,6 +66,22 @@ Clients send input and requests. The host owns physics, phase transitions, hit d
   "version": 1,
   "player_id": "p3",
   "room_id": "842913",
+  "spectator": false,
+  "settings": {},
+  "shapes": ["cube", "sphere"],
+  "colors": ["red", "blue"]
+}
+```
+
+When late joins are disabled after the lobby, the host accepts the peer as a spectator instead of rejecting the connection:
+
+```json
+{
+  "type": "join_accepted",
+  "version": 1,
+  "player_id": "p9",
+  "room_id": "842913",
+  "spectator": true,
   "settings": {},
   "shapes": ["cube", "sphere"],
   "colors": ["red", "blue"]

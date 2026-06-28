@@ -1,5 +1,6 @@
 {
   "round": {
+    "room_setup_seconds": 5,
     "object_rain_seconds": 10,
     "blackout_seconds": 10,
     "seek_seconds": 90,
@@ -17,7 +18,7 @@
     "bullets_per_hider": 1,
     "allow_pickup": true,
     "allow_throwing": true,
-    "scan_pulse_enabled": false,
+    "scan_pulse_enabled": true,
     "scan_pulse_count": 1
   },
   "hiders": {
@@ -26,7 +27,8 @@
     "movement_speed": 1.0,
     "dash_enabled": true,
     "abilities_enabled": false,
-    "cannot_move_while_held": true
+    "cannot_move_while_held": true,
+    "bot_decision_seconds": 1.6
   },
   "network": {
     "max_hiders": 8,
@@ -36,4 +38,3 @@
     "protocol_version": 1
   }
 }
-

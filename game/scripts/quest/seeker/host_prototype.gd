@@ -26,6 +26,8 @@ var xr_runtime_status := "desktop"
 var held_object_id := ""
 var trigger_was_pressed := false
 var grip_was_pressed := false
+var scan_was_pressed := false
+var last_scan_text := "scan ready"
 
 var camera: Camera3D
 var xr_origin: XROrigin3D
@@ -68,9 +70,14 @@ func _process(delta: float) -> void:
 	_send_periodic_snapshots(delta)
 	_update_objects()
 	_update_hud()
-	if simulation.phase == HidefallSimulationScript.PHASE_LOBBY and Input.is_action_just_pressed("start_round"):
-		simulation.start_round()
-		_rebuild_objects()
+	if Input.is_action_just_pressed("start_round"):
+		if simulation.phase == HidefallSimulationScript.PHASE_LOBBY:
+			if simulation.start_round():
+				_rebuild_objects()
+			else:
+				network_status = "waiting for ready players"
+		elif simulation.phase == HidefallSimulationScript.PHASE_ROOM_SETUP:
+			simulation.confirm_room_setup()
 
 
 func _exit_tree() -> void:
@@ -83,6 +90,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_shoot_at_cursor()
 	if event.is_action_pressed("pickup"):
 		_toggle_pickup()
+	if event.is_action_pressed("scan_pulse"):
+		_use_scan_pulse()
 
 
 func _build_world() -> void:
@@ -172,7 +181,7 @@ func _build_hud() -> void:
 	help_label.position = Vector2(20, 580)
 	help_label.size = Vector2(900, 110)
 	help_label.add_theme_font_size_override("font_size", 16)
-	help_label.text = "R: start/rematch  |  Click/trigger: shoot  |  E/grip: pick up/drop  |  WASD: local hider  |  Space: freeze  |  C/V: disguise"
+	help_label.text = "R: start/confirm setup/rematch  |  Click/trigger: shoot  |  E/grip: pick up/drop  |  Q/A: scan pulse  |  WASD local hider"
 	canvas.add_child(help_label)
 
 	crosshair = ColorRect.new()
@@ -259,10 +268,11 @@ func _update_hud() -> void:
 		local_status = "alive" if obj.get("alive", false) else "found"
 	var join_payload := get_join_payload_text()
 	_update_join_qr(join_payload)
-	hud_label.text = "Hidefall Host Prototype\nPhase: %s  Time: %.1f  Shots: %d  Live hiders: %d\nRoom: %s  Token: %s  Host: ws://%s:%d  Network: %s  XR: %s\nPlayers: %d  Local hider: %s  Objects: %d  Held: %s\nScan QR or enter payload: %s\n%s" % [
+	hud_label.text = "Hidefall Host Prototype\nPhase: %s  Time: %.1f  Shots: %d  Scans: %d  Live hiders: %d\nRoom: %s  Token: %s  Host: ws://%s:%d  Network: %s  XR: %s\nPlayers: %d  Local hider: %s  Objects: %d  Held: %s  Scan: %s\nScan QR or enter payload: %s\n%s" % [
 		snapshot["phase"],
 		float(snapshot["time_remaining"]),
 		int(snapshot["shots_remaining"]),
+		int(snapshot.get("scan_pulses_remaining", 0)),
 		_live_hider_count(),
 		simulation.room_id,
 		simulation.room_token,
@@ -274,6 +284,7 @@ func _update_hud() -> void:
 		local_status,
 		simulation.objects.size(),
 		held_object_id if not held_object_id.is_empty() else "none",
+		last_scan_text,
 		join_payload,
 		_results_text(results)
 	]
@@ -340,6 +351,17 @@ func _toggle_pickup() -> void:
 		held_object_id = object_id
 
 
+func _use_scan_pulse() -> void:
+	var result: Dictionary = simulation.use_scan_pulse(camera.global_transform.origin)
+	if not result.get("accepted", false):
+		last_scan_text = String(result.get("reason", "unavailable"))
+		_flash_crosshair(Color(0.65, 0.65, 0.65, 1.0))
+		return
+	var revealed: Array = result.get("revealed", [])
+	last_scan_text = "%d suspicious prop%s nearby" % [revealed.size(), "" if revealed.size() == 1 else "s"]
+	_flash_crosshair(Color(0.1, 0.8, 1.0, 1.0))
+
+
 func _update_held_object() -> void:
 	if held_object_id.is_empty():
 		return
@@ -403,12 +425,16 @@ func _handle_xr_controller_buttons() -> void:
 		return
 	var trigger_pressed := _xr_button_pressed(right_controller, "trigger_click", "trigger")
 	var grip_pressed := _xr_button_pressed(right_controller, "grip_click", "grip")
+	var scan_pressed := _xr_button_pressed(right_controller, "ax_button", "primary")
 	if trigger_pressed and not trigger_was_pressed:
 		_shoot_at_cursor()
 	if grip_pressed and not grip_was_pressed:
 		_toggle_pickup()
+	if scan_pressed and not scan_was_pressed:
+		_use_scan_pulse()
 	trigger_was_pressed = trigger_pressed
 	grip_was_pressed = grip_pressed
+	scan_was_pressed = scan_pressed
 
 
 func _xr_button_pressed(controller: XRController3D, button_name: String, axis_name: String) -> bool:
@@ -536,22 +562,23 @@ func _handle_join_request(peer_id: int, message: Dictionary) -> void:
 	if peer_to_player.has(peer_id):
 		network_host.send_to_peer(peer_id, _reject_message("already_joined", "This peer is already joined."))
 		return
-	if simulation.phase != HidefallSimulationScript.PHASE_LOBBY and not bool(config.get_value("network", "allow_late_join", false)):
-		network_host.send_to_peer(peer_id, _reject_message("round_in_progress", "Late join is disabled until the next lobby."))
-		return
 	if peer_to_player.size() >= int(config.get_value("network", "max_hiders", 8)):
 		network_host.send_to_peer(peer_id, _reject_message("room_full", "The room is full."))
 		return
 	var player_name := String(message.get("player_name", "Hider")).strip_edges()
 	if player_name.is_empty():
 		player_name = "Hider"
-	var player_id: String = simulation.add_hider(player_name, false)
+	var late_spectator: bool = simulation.phase != HidefallSimulationScript.PHASE_LOBBY and not bool(config.get_value("network", "allow_late_join", false))
+	var player_id: String = simulation.add_spectator(player_name) if late_spectator else simulation.add_hider(player_name, false)
+	if not late_spectator:
+		simulation.set_player_ready(player_id, false)
 	peer_to_player[peer_id] = player_id
 	network_host.send_to_peer(peer_id, {
 		"type": "join_accepted",
 		"version": NetworkMessageValidatorScript.PROTOCOL_VERSION,
 		"player_id": player_id,
 		"room_id": simulation.room_id,
+		"spectator": late_spectator,
 		"settings": config.duplicate_data(),
 		"shapes": content.get_shape_ids(),
 		"colors": content.get_color_ids()
@@ -579,6 +606,7 @@ func _build_lobby_snapshot() -> Dictionary:
 		"phase": simulation.phase,
 		"time_remaining": 0.0,
 		"shots_remaining": simulation.shots_remaining,
+		"scan_pulses_remaining": simulation.scan_pulses_remaining,
 		"players": simulation.players.values(),
 		"objects": [],
 		"danger": "safe",
