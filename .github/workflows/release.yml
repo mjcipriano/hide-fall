@@ -70,8 +70,9 @@ jobs:
       - name: Verify APK signatures
         shell: bash -el {0}
         run: |
-          tools/android-sdk/build-tools/35.0.0/apksigner verify --verbose build/hidefall-quest-debug.apk
-          tools/android-sdk/build-tools/35.0.0/apksigner verify --verbose build/hidefall-mobile-debug.apk
+          apksigner="${ANDROID_SDK_ROOT:-${PWD}/tools/android-sdk}/build-tools/35.0.0/apksigner"
+          "${apksigner}" verify --verbose build/hidefall-quest-debug.apk
+          "${apksigner}" verify --verbose build/hidefall-mobile-debug.apk
 
       - name: Write checksums and release notes
         shell: bash -el {0}
@@ -102,7 +103,6 @@ jobs:
             build/hidefall-mobile-debug.apk \
             build/SHA256SUMS \
             --repo "${GITHUB_REPOSITORY}" \
-            --target "${GITHUB_SHA}" \
             --title "Hidefall ${{ steps.version.outputs.version }}" \
             --notes-file build/RELEASE_NOTES.md \
             --verify-tag

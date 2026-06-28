@@ -94,11 +94,14 @@ This file is the handoff point for future agents. Keep it current before and aft
   - writes `SHA256SUMS`,
   - creates a GitHub Release and attaches both APKs plus checksums.
 - Updated `BUILD_AND_RELEASE.md` with the tag-driven release process.
+- Pushed tag `v0.1.0`.
+- Release workflow run `28330348506` failed at 2026-06-28T13:35:34-04:00 because the verification step hardcoded `tools/android-sdk/.../apksigner`; GitHub-hosted runners use `ANDROID_SDK_ROOT` for the SDK path.
+- Patched `.github/workflows/release.yml` to verify APKs using `${ANDROID_SDK_ROOT}/build-tools/35.0.0/apksigner` and to create releases from the existing tag without passing a separate `--target`.
 
 ## Next
 
-1. Push the release workflow to `master`.
-2. Create and push tag `v0.1.0`.
+1. Push the release workflow fix to `master`.
+2. Manually run the corrected release workflow for existing tag `v0.1.0`.
 3. Watch the release workflow until it passes.
 4. Confirm GitHub Release `v0.1.0` exists and has `hidefall-quest-debug.apk`, `hidefall-mobile-debug.apk`, and `SHA256SUMS` attached.
 5. Test the debug APKs on physical Quest/Android/iOS devices.
