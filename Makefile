@@ -4,7 +4,7 @@ GODOT_ZIP := /tmp/godot-$(GODOT_VERSION)-linux.zip
 GODOT_URL := https://github.com/godotengine/godot/releases/download/$(GODOT_VERSION)/Godot_v$(GODOT_VERSION)_linux.x86_64.zip
 GODOT_ENV := XDG_DATA_HOME=/tmp/hidefall-godot-data XDG_CONFIG_HOME=/tmp/hidefall-godot-config XDG_CACHE_HOME=/tmp/hidefall-godot-cache
 
-.PHONY: install-godot install-export-templates install-android-sdk create-debug-keystore configure-android-export build-apks build-quest-apk build-mobile-apk godot-version validate test run clean-godot
+.PHONY: install-godot install-export-templates install-android-sdk ensure-android-sdk create-debug-keystore configure-android-export build-apks build-quest-apk build-mobile-apk godot-version validate test run clean-godot
 
 install-godot:
 	mkdir -p tools/godot
@@ -18,10 +18,13 @@ install-export-templates:
 install-android-sdk:
 	tools/install_android_sdk.sh
 
+ensure-android-sdk:
+	test -x tools/android-sdk/platform-tools/adb && test -x tools/android-sdk/build-tools/35.0.0/apksigner || tools/install_android_sdk.sh
+
 create-debug-keystore:
 	tools/create_debug_keystore.sh
 
-configure-android-export: create-debug-keystore
+configure-android-export: ensure-android-sdk create-debug-keystore
 	env $(GODOT_ENV) python tools/configure_godot_android.py
 
 godot-version:
