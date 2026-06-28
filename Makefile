@@ -2,7 +2,14 @@ GODOT_VERSION := 4.7-stable
 GODOT_BIN := tools/godot/Godot_v$(GODOT_VERSION)_linux.x86_64
 GODOT_ZIP := /tmp/godot-$(GODOT_VERSION)-linux.zip
 GODOT_URL := https://github.com/godotengine/godot/releases/download/$(GODOT_VERSION)/Godot_v$(GODOT_VERSION)_linux.x86_64.zip
-GODOT_ENV := XDG_DATA_HOME=/tmp/hidefall-godot-data XDG_CONFIG_HOME=/tmp/hidefall-godot-config XDG_CACHE_HOME=/tmp/hidefall-godot-cache
+ANDROID_SDK_ROOT ?= $(abspath tools/android-sdk)
+ANDROID_HOME ?= $(ANDROID_SDK_ROOT)
+JAVA_HOME ?= $(CONDA_PREFIX)/lib/jvm
+GODOT_ENV := XDG_DATA_HOME=/tmp/hidefall-godot-data XDG_CONFIG_HOME=/tmp/hidefall-godot-config XDG_CACHE_HOME=/tmp/hidefall-godot-cache ANDROID_SDK_ROOT=$(ANDROID_SDK_ROOT) ANDROID_HOME=$(ANDROID_HOME) JAVA_HOME=$(JAVA_HOME)
+
+export ANDROID_SDK_ROOT
+export ANDROID_HOME
+export JAVA_HOME
 
 .PHONY: install-godot install-export-templates install-android-sdk ensure-android-sdk create-debug-keystore configure-android-export build-apks build-quest-apk build-mobile-apk godot-version validate test run clean-godot
 
@@ -19,7 +26,7 @@ install-android-sdk:
 	tools/install_android_sdk.sh
 
 ensure-android-sdk:
-	test -x tools/android-sdk/platform-tools/adb && test -x tools/android-sdk/build-tools/35.0.0/apksigner || tools/install_android_sdk.sh
+	test -x "$(ANDROID_SDK_ROOT)/platform-tools/adb" && test -x "$(ANDROID_SDK_ROOT)/build-tools/35.0.0/apksigner" || tools/install_android_sdk.sh
 
 create-debug-keystore:
 	tools/create_debug_keystore.sh

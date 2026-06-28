@@ -53,6 +53,11 @@ This file is the handoff point for future agents. Keep it current before and aft
   - `conda run -n hidefall make build-apks GODOT_ENV='XDG_DATA_HOME=/tmp/hidefall-godot-data XDG_CONFIG_HOME=/tmp/hidefall-clean-config XDG_CACHE_HOME=/tmp/hidefall-godot-cache'`
   - `tools/android-sdk/build-tools/35.0.0/apksigner verify --verbose build/hidefall-quest-debug.apk`
   - `tools/android-sdk/build-tools/35.0.0/apksigner verify --verbose build/hidefall-mobile-debug.apk`
+- After CI still reported missing Android SDK directories on the runner, pinned `ANDROID_SDK_ROOT`, `ANDROID_HOME`, and `JAVA_HOME` through the Makefile and made `tools/configure_godot_android.py` honor those environment values.
+- Re-verified locally at 2026-06-28T00:57:41-04:00:
+  - `conda run -n hidefall make test`
+  - clean-config `conda run -n hidefall make build-apks`
+  - APK signature verification for both debug APKs.
 
 ## Next
 

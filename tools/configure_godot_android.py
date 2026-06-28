@@ -18,7 +18,11 @@ def q(value: Path | str) -> str:
 
 
 def main() -> None:
-    android_sdk = ROOT / "tools" / "android-sdk"
+    android_sdk = Path(
+        os.environ.get("ANDROID_SDK_ROOT")
+        or os.environ.get("ANDROID_HOME")
+        or ROOT / "tools" / "android-sdk"
+    )
     java_sdk = Path(os.environ.get("JAVA_HOME") or os.environ.get("CONDA_PREFIX", ""))
     debug_keystore = ROOT / "tools" / "android-keystore" / "debug.keystore"
     SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
