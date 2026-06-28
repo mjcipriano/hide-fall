@@ -75,12 +75,18 @@ This file is the handoff point for future agents. Keep it current before and aft
   - APK signature verification for both debug APKs.
 - Added disconnect handling and 10-round simulation soak coverage to the Godot test runner.
 - Re-verified locally at 2026-06-28T01:07:32-04:00 with `conda run -n hidefall make test`.
+- GitHub Actions passed on PR #1 at 2026-06-28T11:05:03-04:00:
+  - Run `28312156078`: `test` passed, `android-apks` passed.
+  - Run `28312155231`: `test` passed, `android-apks` passed.
+- Confirmed CI artifact `hidefall-debug-apks` exists and is not expired for both successful runs.
+- Downloaded the latest CI artifact from run `28312156078` to `/tmp/hidefall-ci-artifacts`.
+- Verified CI-built APK signatures:
+  - `/tmp/hidefall-ci-artifacts/hidefall-quest-debug.apk`
+  - `/tmp/hidefall-ci-artifacts/hidefall-mobile-debug.apk`
 
 ## Next
 
-1. Watch PR #1 GitHub Actions until the test and Android APK jobs pass.
-2. Confirm uploaded CI artifacts include `hidefall-quest-debug.apk` and `hidefall-mobile-debug.apk`.
+1. Test the debug APKs on physical Quest/Android/iOS devices.
+2. Install and validate the Godot OpenXR Vendors plugin for Meta Quest passthrough/scene API support.
 3. Add release signing secrets and release workflow for signed release APKs/AABs.
-4. Expand simulation tests for reconnect, late join, and deeper bot behavior.
-5. Test the debug APKs on physical Quest/Android/iOS devices.
-6. Install and validate the Godot OpenXR Vendors plugin for Meta Quest passthrough/scene API support.
+4. Expand simulation tests for reconnect and deeper bot behavior.
