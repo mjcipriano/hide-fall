@@ -97,14 +97,26 @@ This file is the handoff point for future agents. Keep it current before and aft
 - Pushed tag `v0.1.0`.
 - Release workflow run `28330348506` failed at 2026-06-28T13:35:34-04:00 because the verification step hardcoded `tools/android-sdk/.../apksigner`; GitHub-hosted runners use `ANDROID_SDK_ROOT` for the SDK path.
 - Patched `.github/workflows/release.yml` to verify APKs using `${ANDROID_SDK_ROOT}/build-tools/35.0.0/apksigner` and to create releases from the existing tag without passing a separate `--target`.
+- Pushed the release workflow fix to `master` in commit `c51f0bf`.
+- Dispatched corrected release workflow run `28330458668` for existing tag `v0.1.0`.
+- Release workflow run `28330458668` passed at 2026-06-28T13:39:55-04:00:
+  - tests passed,
+  - both APKs built,
+  - both APK signatures verified,
+  - checksums generated,
+  - GitHub Release created.
+- Confirmed GitHub Release `v0.1.0` exists:
+  - URL: https://github.com/mjcipriano/hide-fall/releases/tag/v0.1.0
+  - title: `Hidefall 0.1.0`
+  - attached assets: `hidefall-quest-debug.apk`, `hidefall-mobile-debug.apk`, `SHA256SUMS`.
+- Downloaded release assets to `/tmp/hidefall-release-v0.1.0` and verified:
+  - `sha256sum -c SHA256SUMS` passes,
+  - `apksigner verify --verbose` passes for both release APK assets.
+- Confirmed normal `master` Test And Build workflow is green for commit `c51f0bf` in run `28330452425`.
 
 ## Next
 
-1. Push the release workflow fix to `master`.
-2. Manually run the corrected release workflow for existing tag `v0.1.0`.
-3. Watch the release workflow until it passes.
-4. Confirm GitHub Release `v0.1.0` exists and has `hidefall-quest-debug.apk`, `hidefall-mobile-debug.apk`, and `SHA256SUMS` attached.
-5. Test the debug APKs on physical Quest/Android/iOS devices.
-6. Install and validate the Godot OpenXR Vendors plugin for Meta Quest passthrough/scene API support.
-7. Add production release signing secrets/workflow for store-ready signed release APKs/AABs.
-8. Expand simulation tests for reconnect and deeper bot behavior.
+1. Test the debug APKs on physical Quest/Android/iOS devices.
+2. Install and validate the Godot OpenXR Vendors plugin for Meta Quest passthrough/scene API support.
+3. Add production release signing secrets/workflow for store-ready signed release APKs/AABs.
+4. Expand simulation tests for reconnect and deeper bot behavior.
