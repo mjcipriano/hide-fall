@@ -38,6 +38,12 @@ var help_label: Label
 var qr_label: Label
 var qr_texture_rect: TextureRect
 var crosshair: ColorRect
+var xr_hud_root: Node3D
+var xr_hud_label: Label3D
+var xr_help_label: Label3D
+var xr_qr_sprite: Sprite3D
+var xr_crosshair: MeshInstance3D
+var world_environment: WorldEnvironment
 var arena_root: Node3D
 var object_root: Node3D
 
@@ -66,18 +72,13 @@ func _process(delta: float) -> void:
 	_handle_xr_controller_buttons()
 	_update_seeker_pose()
 	_update_held_object()
+	_update_xr_pointer_dot()
 	simulation.advance(delta)
 	_send_periodic_snapshots(delta)
 	_update_objects()
 	_update_hud()
 	if Input.is_action_just_pressed("start_round"):
-		if simulation.phase == HidefallSimulationScript.PHASE_LOBBY:
-			if simulation.start_round():
-				_rebuild_objects()
-			else:
-				network_status = "waiting for ready players"
-		elif simulation.phase == HidefallSimulationScript.PHASE_ROOM_SETUP:
-			simulation.confirm_room_setup()
+		_activate_primary_action()
 
 
 func _exit_tree() -> void:
@@ -110,8 +111,10 @@ func _build_world() -> void:
 	plane.size = Vector2(7.0, 7.0)
 	floor_mesh.mesh = plane
 	var floor_material := StandardMaterial3D.new()
-	floor_material.albedo_color = Color(0.10, 0.12, 0.16)
+	floor_material.albedo_color = Color(0.10, 0.12, 0.16, 0.18 if _is_xr_active() else 1.0)
 	floor_material.roughness = 1.0
+	if _is_xr_active():
+		floor_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	floor_mesh.material_override = floor_material
 	floor_body.add_child(floor_mesh)
 
@@ -141,6 +144,12 @@ func _build_world() -> void:
 	fill.light_energy = 1.0
 	fill.omni_range = 8.0
 	add_child(fill)
+
+	world_environment = WorldEnvironment.new()
+	world_environment.name = "WorldEnvironment"
+	world_environment.environment = Environment.new()
+	add_child(world_environment)
+	_configure_xr_passthrough()
 
 	if camera == null:
 		camera = Camera3D.new()
@@ -197,6 +206,61 @@ func _build_hud() -> void:
 	crosshair.offset_right = 4
 	crosshair.offset_bottom = 4
 	canvas.add_child(crosshair)
+
+	if _is_xr_active():
+		canvas.visible = false
+		_build_xr_hud()
+
+
+func _build_xr_hud() -> void:
+	xr_hud_root = Node3D.new()
+	xr_hud_root.name = "XRWorldHud"
+	xr_hud_root.position = Vector3(-1.4, 1.55, -2.15)
+	add_child(xr_hud_root)
+
+	xr_hud_label = Label3D.new()
+	xr_hud_label.name = "StatusText"
+	xr_hud_label.font_size = 28
+	xr_hud_label.outline_size = 8
+	xr_hud_label.modulate = Color(0.92, 0.98, 1.0, 1.0)
+	xr_hud_label.pixel_size = 0.0022
+	xr_hud_label.width = 920.0
+	xr_hud_label.position = Vector3(0.0, 0.34, 0.0)
+	xr_hud_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	xr_hud_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	xr_hud_root.add_child(xr_hud_label)
+
+	xr_help_label = Label3D.new()
+	xr_help_label.name = "HelpText"
+	xr_help_label.font_size = 22
+	xr_help_label.outline_size = 6
+	xr_help_label.modulate = Color(0.85, 0.92, 1.0, 1.0)
+	xr_help_label.pixel_size = 0.002
+	xr_help_label.width = 900.0
+	xr_help_label.position = Vector3(0.0, -0.38, 0.0)
+	xr_help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	xr_help_label.text = "A: start/confirm/scan  |  Trigger: shoot  |  Grip: pick up/drop"
+	xr_hud_root.add_child(xr_help_label)
+
+	xr_qr_sprite = Sprite3D.new()
+	xr_qr_sprite.name = "JoinQr"
+	xr_qr_sprite.pixel_size = 0.0021
+	xr_qr_sprite.position = Vector3(1.45, 0.10, 0.0)
+	xr_qr_sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	xr_hud_root.add_child(xr_qr_sprite)
+
+	xr_crosshair = MeshInstance3D.new()
+	xr_crosshair.name = "PointerDot"
+	var crosshair_mesh := SphereMesh.new()
+	crosshair_mesh.radius = 0.012
+	crosshair_mesh.height = 0.024
+	xr_crosshair.mesh = crosshair_mesh
+	var crosshair_material := StandardMaterial3D.new()
+	crosshair_material.albedo_color = Color(1.0, 1.0, 1.0, 0.9)
+	crosshair_material.emission_enabled = true
+	crosshair_material.emission = Color(1.0, 1.0, 1.0)
+	xr_crosshair.material_override = crosshair_material
+	add_child(xr_crosshair)
 
 
 func _handle_input() -> void:
@@ -268,7 +332,7 @@ func _update_hud() -> void:
 		local_status = "alive" if obj.get("alive", false) else "found"
 	var join_payload := get_join_payload_text()
 	_update_join_qr(join_payload)
-	hud_label.text = "Hidefall Host Prototype\nPhase: %s  Time: %.1f  Shots: %d  Scans: %d  Live hiders: %d\nRoom: %s  Token: %s  Host: ws://%s:%d  Network: %s  XR: %s\nPlayers: %d  Local hider: %s  Objects: %d  Held: %s  Scan: %s\nScan QR or enter payload: %s\n%s" % [
+	var status_text := "Hidefall Host Prototype\nPhase: %s  Time: %.1f  Shots: %d  Scans: %d  Live hiders: %d\nRoom: %s  Token: %s  Host: ws://%s:%d  Network: %s  XR: %s\nPlayers: %d  Local hider: %s  Objects: %d  Held: %s  Scan: %s\nScan QR or enter payload: %s\n%s" % [
 		snapshot["phase"],
 		float(snapshot["time_remaining"]),
 		int(snapshot["shots_remaining"]),
@@ -288,6 +352,10 @@ func _update_hud() -> void:
 		join_payload,
 		_results_text(results)
 	]
+	if hud_label != null:
+		hud_label.text = status_text
+	if xr_hud_label != null:
+		xr_hud_label.text = status_text
 
 
 func get_join_payload_text() -> String:
@@ -295,10 +363,14 @@ func get_join_payload_text() -> String:
 
 
 func _update_join_qr(join_payload: String) -> void:
-	if qr_texture_rect == null or join_payload == current_join_payload:
+	if join_payload == current_join_payload:
 		return
 	current_join_payload = join_payload
-	qr_texture_rect.texture = QrCodeScript.make_texture(join_payload, 5)
+	var texture := QrCodeScript.make_texture(join_payload, 5)
+	if qr_texture_rect != null:
+		qr_texture_rect.texture = texture
+	if xr_qr_sprite != null:
+		xr_qr_sprite.texture = texture
 
 
 func _shoot_at_cursor() -> void:
@@ -371,6 +443,13 @@ func _update_held_object() -> void:
 		held_object_id = ""
 
 
+func _update_xr_pointer_dot() -> void:
+	if xr_crosshair == null or camera == null:
+		return
+	var ray := _get_seeker_ray()
+	xr_crosshair.global_position = ray["origin"] + ray["direction"] * 1.4
+
+
 func _get_seeker_ray() -> Dictionary:
 	var source: Node3D = camera
 	if right_controller != null and right_controller.get_is_active():
@@ -395,7 +474,7 @@ func _setup_xr_runtime() -> void:
 			xr_runtime_status = "OpenXR init failed"
 			return
 	get_viewport().use_xr = true
-	xr_runtime_status = "OpenXR"
+	xr_runtime_status = "OpenXR immersive"
 	xr_origin = XROrigin3D.new()
 	xr_origin.name = "XROrigin"
 	add_child(xr_origin)
@@ -411,6 +490,26 @@ func _setup_xr_runtime() -> void:
 	right_controller.name = "RightController"
 	right_controller.tracker = &"right_hand"
 	xr_origin.add_child(right_controller)
+
+
+func _configure_xr_passthrough() -> void:
+	if not _is_xr_active() or world_environment == null:
+		return
+	var openxr = XRServer.find_interface("OpenXR")
+	if openxr == null:
+		return
+	var supported_modes: Array = openxr.get_supported_environment_blend_modes()
+	if supported_modes.has(XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND):
+		get_viewport().transparent_bg = true
+		world_environment.environment.background_mode = Environment.BG_COLOR
+		world_environment.environment.background_color = Color(0.0, 0.0, 0.0, 0.0)
+		openxr.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND
+		xr_runtime_status += " passthrough"
+	else:
+		get_viewport().transparent_bg = false
+		world_environment.environment.background_mode = Environment.BG_SKY
+		openxr.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_OPAQUE
+		xr_runtime_status += " opaque"
 
 
 func _update_seeker_pose() -> void:
@@ -431,7 +530,7 @@ func _handle_xr_controller_buttons() -> void:
 	if grip_pressed and not grip_was_pressed:
 		_toggle_pickup()
 	if scan_pressed and not scan_was_pressed:
-		_use_scan_pulse()
+		_activate_primary_action()
 	trigger_was_pressed = trigger_pressed
 	grip_was_pressed = grip_pressed
 	scan_was_pressed = scan_pressed
@@ -441,6 +540,26 @@ func _xr_button_pressed(controller: XRController3D, button_name: String, axis_na
 	if controller.is_button_pressed(button_name):
 		return true
 	return controller.get_float(axis_name) > 0.75
+
+
+func _activate_primary_action() -> void:
+	match simulation.phase:
+		HidefallSimulationScript.PHASE_LOBBY:
+			if simulation.start_round():
+				_rebuild_objects()
+			else:
+				network_status = "waiting for ready players"
+		HidefallSimulationScript.PHASE_ROOM_SETUP:
+			simulation.confirm_room_setup()
+		HidefallSimulationScript.PHASE_SEEK:
+			_use_scan_pulse()
+		HidefallSimulationScript.PHASE_RESULTS:
+			simulation.start_round()
+			_rebuild_objects()
+
+
+func _is_xr_active() -> bool:
+	return xr_origin != null and get_viewport().use_xr
 
 
 func _mesh_for_shape(shape_id: String) -> Mesh:

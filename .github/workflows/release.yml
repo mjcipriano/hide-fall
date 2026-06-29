@@ -67,12 +67,9 @@ jobs:
         shell: bash -el {0}
         run: make build-apks
 
-      - name: Verify APK signatures
+      - name: Verify APK artifacts
         shell: bash -el {0}
-        run: |
-          apksigner="${ANDROID_SDK_ROOT:-${PWD}/tools/android-sdk}/build-tools/35.0.0/apksigner"
-          "${apksigner}" verify --verbose build/hidefall-quest-debug.apk
-          "${apksigner}" verify --verbose build/hidefall-mobile-debug.apk
+        run: make verify-apks
 
       - name: Write checksums and release notes
         shell: bash -el {0}

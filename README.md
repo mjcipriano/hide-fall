@@ -7,6 +7,7 @@ Hidefall is a Godot 4 mixed-reality prop-hunt party game prototype. The target p
 - Engine: Godot `4.7-stable`
 - Primary project: `game/project.godot`
 - Local verification: `make test`
+- APK verification: `make build-apks`
 - Content validation: `make validate`
 - Progress log: `PROGRESS.md`
 
@@ -27,7 +28,7 @@ Godot itself is installed by `make install-godot` into `tools/godot/` from the o
 make run
 ```
 
-The current executable scene is a Godot prototype of the Quest host experience. It starts in a lobby, runs a WebSocket LAN host, shows a QR join code plus manual payload, waits for joined hiders to ready up, and begins a round when `R` is pressed. On OpenXR-capable Quest runtime it initializes an `XROrigin3D`, headset camera, and controller nodes; on desktop/headless it falls back to a normal camera for local testing.
+The current executable scene is a Godot prototype of the Quest host experience. It starts in a lobby, runs a WebSocket LAN host, shows a QR join code plus manual payload, waits for joined hiders to ready up, and begins a round when `R` is pressed. The Quest export is an immersive OpenXR APK using the Godot OpenXR Vendors Meta plugin, Quest/OpenXR manifest categories, Quest 3/3S support metadata, and passthrough blend mode. On headset it initializes an `XROrigin3D`, headset camera, controller nodes, and world-space HUD; on desktop/headless it falls back to a normal camera and CanvasLayer HUD for local testing.
 
 Implemented gameplay includes lobby ready gating, room setup confirmation, object rain, blackout, seek, results/rematch, hider movement and freeze, shape/color disguise changes, bot hider behavior, pickup/drop inspection, limited seeker shots, a limited scan pulse, late-join spectators, scoring, and LAN phone client snapshots.
 
@@ -63,11 +64,14 @@ It is functional as a Godot client scene. A debug Android APK export preset is i
 make install-export-templates
 make install-android-sdk
 make build-apks
+make verify-apks
 ```
 
 Outputs:
 
 - `build/hidefall-quest-debug.apk`
 - `build/hidefall-mobile-debug.apk`
+
+The Quest APK uses the generated Android Gradle template so the Meta OpenXR vendor AAR and native plugin are packaged. The Mobile APK remains a normal flat Android hider client with OpenXR disabled.
 
 Release signing and store packaging are intentionally separate from the debug APK path because signing credentials must not be committed.

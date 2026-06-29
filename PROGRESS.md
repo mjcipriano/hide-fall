@@ -147,11 +147,47 @@ This file is the handoff point for future agents. Keep it current before and aft
 - Downloaded release assets to `/tmp/hidefall-release-v0.2.0` and verified:
   - `sha256sum -c SHA256SUMS` passes,
   - `apksigner verify --verbose` passes for both release APK assets.
+- User tested the `v0.2.0` Quest APK on physical Quest hardware and reported it launched as a flat screen instead of immersive VR/MR, and that a button press could make the screen disappear.
+- Root cause found locally: the Quest export was still a normal Android APK path without the Android Gradle template, Godot OpenXR Vendors Meta plugin packaging, and Quest/OpenXR immersive manifest categories. The scene had runtime OpenXR code, but the APK metadata/package path did not force immersive headset launch.
+- Implemented the `v0.2.1` Quest XR packaging fix:
+  - enabled Gradle export for the Quest preset,
+  - vendored the official Godot OpenXR Vendors `5.1.0-stable` Meta/Android runtime pieces,
+  - enabled the Meta OpenXR plugin, Quest 3/3S support metadata, and passthrough option in the Quest preset,
+  - added `openxr/enabled`, alpha-blend passthrough, and mobile renderer settings in `project.godot`,
+  - added `tools/prepare_android_xr_template.py` to generate the ignored Android template and patch Gradle/manifest files,
+  - injects `com.oculus.intent.category.VR`, `org.khronos.openxr.intent.category.IMMERSIVE_HMD`, and `android.hardware.vr.headtracking` into the Quest build,
+  - packages `libgodotopenxrvendors.so`, `libopenxr_loader.so`, the Meta AAR, and `openxr_action_map.tres`,
+  - mirrors the Quest HUD/QR/status into 3D nodes when XR is active while preserving the desktop CanvasLayer fallback,
+  - made Quest primary button context-sensitive instead of only scan-pulse bound,
+  - fixed deferred boot scene switching to avoid Godot busy-tree errors,
+  - bumped Android APK version metadata to `0.2.1` / code `3`,
+  - updated Android SDK bootstrap to install Android 36 platform/build tools used by the Gradle export.
+  - added `tools/verify_android_artifacts.sh`, `make verify-apks`, and CI/release workflow verification so signatures, Quest immersive manifest entries, packaged OpenXR vendor files, and mobile non-XR packaging are checked automatically.
+- Local verification passed for the `v0.2.1` fix before commit:
+  - `conda run -n hidefall make test`,
+  - `conda run -n hidefall make build-apks` outside the sandbox because Gradle probes local network interfaces,
+  - `conda run -n hidefall make verify-apks`.
+- The local `v0.2.1` Quest artifact verification confirms:
+  - debug signature verifies,
+  - manifest has version `0.2.1` / code `3`,
+  - manifest has `org.khronos.openxr.permission.OPENXR`, `org.khronos.openxr.permission.OPENXR_SYSTEM`, required `android.hardware.vr.headtracking`, `com.oculus.intent.category.VR`, `org.khronos.openxr.intent.category.IMMERSIVE_HMD`, `com.oculus.supportedDevices`, and `org.godotengine.plugin.v2.GodotOpenXR`,
+  - APK packages `lib/arm64-v8a/libgodotopenxrvendors.so`, `lib/arm64-v8a/libopenxr_loader.so`, `assets/addons/godotopenxrvendors/plugin.gdextension`, and the OpenXR action map.
+- The local `v0.2.1` mobile artifact verification confirms:
+  - debug signature verifies,
+  - manifest has version `0.2.1` / code `3`,
+  - manifest has no Quest/OpenXR categories, OpenXR permissions, VR headtracking feature, or GodotOpenXR plugin metadata,
+  - APK has no Quest OpenXR vendor binaries.
+- Remaining release work for this fix:
+  - commit and push `master`,
+  - confirm push CI passes with the new artifact verifier,
+  - tag and push `v0.2.1`,
+  - confirm release workflow publishes APK assets plus `SHA256SUMS`,
+  - download released assets and verify checksums/APK artifact contents.
 
 ## Next
 
-1. Test the debug APKs on physical Quest/Android/iOS devices.
-2. Install and validate the Godot OpenXR Vendors plugin for Meta Quest passthrough/scene API support.
+1. Complete and publish the `v0.2.1` Quest XR packaging release, including GitHub Release assets.
+2. Test the `v0.2.1` Quest APK on physical Quest hardware to confirm immersive OpenXR launch and passthrough behavior.
 3. Add production release signing secrets/workflow for store-ready signed release APKs/AABs.
 4. Expand simulation tests for reconnect behavior, network interruptions, and deeper bot behavior.
 5. Replace desktop/fallback room approximation with validated Quest room mesh, boundary, passthrough, and scene API behavior after plugin/device verification.

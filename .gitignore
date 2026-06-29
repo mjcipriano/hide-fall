@@ -1,5 +1,7 @@
 .godot/
 game/.godot/
+game/.build_version
+game/android/
 tools/godot/Godot_*
 tools/android-sdk/
 tools/android-keystore/*.keystore

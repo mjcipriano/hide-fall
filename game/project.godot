@@ -16,6 +16,14 @@ window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
 
+[xr]
+
+openxr/enabled=true
+openxr/form_factor=0
+openxr/reference_space=1
+openxr/environment_blend_mode=2
+openxr/extensions/meta/passthrough=true
+
 [input]
 
 shoot={
@@ -65,5 +73,5 @@ start_round={
 
 [rendering]
 
-renderer/rendering_method="gl_compatibility"
+renderer/rendering_method="mobile"
 textures/vram_compression/import_etc2_astc=true

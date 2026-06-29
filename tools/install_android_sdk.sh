@@ -21,6 +21,8 @@ set -o pipefail
 "${SDKMANAGER}" --sdk_root="${ANDROID_SDK_ROOT}" "platform-tools"
 "${SDKMANAGER}" --sdk_root="${ANDROID_SDK_ROOT}" "platforms;android-35"
 "${SDKMANAGER}" --sdk_root="${ANDROID_SDK_ROOT}" "build-tools;35.0.0"
+"${SDKMANAGER}" --sdk_root="${ANDROID_SDK_ROOT}" "platforms;android-36"
+"${SDKMANAGER}" --sdk_root="${ANDROID_SDK_ROOT}" "build-tools;36.1.0"
 
 test -x "${ANDROID_SDK_ROOT}/platform-tools/adb"
-test -x "${ANDROID_SDK_ROOT}/build-tools/35.0.0/apksigner"
+test -x "${ANDROID_SDK_ROOT}/build-tools/36.1.0/apksigner"
