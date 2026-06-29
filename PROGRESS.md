@@ -183,6 +183,10 @@ This file is the handoff point for future agents. Keep it current before and aft
   - tag and push `v0.2.1`,
   - confirm release workflow publishes APK assets plus `SHA256SUMS`,
   - download released assets and verify checksums/APK artifact contents.
+- Pushed commit `3ba36a8` to `master`.
+- GitHub Actions run `28342210766` passed the `test` job and built both APKs, then failed in `Verify APK artifacts` because the runner did not have `rg` installed. The APK signatures had already verified before that tool failure.
+- Replaced `rg` usage inside `tools/verify_android_artifacts.sh` with `grep -E` so the verifier has no hidden ripgrep dependency.
+- Re-verified locally with `conda run -n hidefall make verify-apks`.
 
 ## Next
 

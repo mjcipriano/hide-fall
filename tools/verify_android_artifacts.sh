@@ -33,7 +33,7 @@ required_quest_entries=(
 )
 
 for pattern in "${required_quest_entries[@]}"; do
-  if ! rg -q "${pattern}" <<< "${quest_manifest}"; then
+  if ! grep -Eq "${pattern}" <<< "${quest_manifest}"; then
     echo "Quest APK is missing required manifest entry matching: ${pattern}" >&2
     exit 1
   fi
@@ -48,24 +48,24 @@ required_quest_files=(
 )
 
 for pattern in "${required_quest_files[@]}"; do
-  if ! rg -q "${pattern}" <<< "${quest_contents}"; then
+  if ! grep -Eq "${pattern}" <<< "${quest_contents}"; then
     echo "Quest APK is missing packaged OpenXR file matching: ${pattern}" >&2
     exit 1
   fi
 done
 
 mobile_manifest="$("${BUILD_TOOLS_DIR}/aapt" dump xmltree "${mobile_apk}" AndroidManifest.xml)"
-if rg -q 'com.oculus.intent.category.VR|org.khronos.openxr.intent.category.IMMERSIVE_HMD|org.godotengine.plugin.v2.GodotOpenXR|android.hardware.vr.headtracking|org.khronos.openxr.permission.OPENXR' <<< "${mobile_manifest}"; then
+if grep -Eq 'com.oculus.intent.category.VR|org.khronos.openxr.intent.category.IMMERSIVE_HMD|org.godotengine.plugin.v2.GodotOpenXR|android.hardware.vr.headtracking|org.khronos.openxr.permission.OPENXR' <<< "${mobile_manifest}"; then
   echo "Mobile APK unexpectedly contains XR manifest entries" >&2
   exit 1
 fi
-if ! rg -q 'android:versionName.*"0.2.1"' <<< "${mobile_manifest}"; then
+if ! grep -Eq 'android:versionName.*"0.2.1"' <<< "${mobile_manifest}"; then
   echo "Mobile APK versionName is not 0.2.1" >&2
   exit 1
 fi
 
 mobile_contents="$(unzip -l "${mobile_apk}")"
-if rg -q 'libgodotopenxrvendors|libopenxr_loader|assets/addons/godotopenxrvendors' <<< "${mobile_contents}"; then
+if grep -Eq 'libgodotopenxrvendors|libopenxr_loader|assets/addons/godotopenxrvendors' <<< "${mobile_contents}"; then
   echo "Mobile APK unexpectedly contains Quest OpenXR vendor binaries" >&2
   exit 1
 fi
