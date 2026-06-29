@@ -187,11 +187,43 @@ This file is the handoff point for future agents. Keep it current before and aft
 - GitHub Actions run `28342210766` passed the `test` job and built both APKs, then failed in `Verify APK artifacts` because the runner did not have `rg` installed. The APK signatures had already verified before that tool failure.
 - Replaced `rg` usage inside `tools/verify_android_artifacts.sh` with `grep -E` so the verifier has no hidden ripgrep dependency.
 - Re-verified locally with `conda run -n hidefall make verify-apks`.
+- Pushed commit `21552b8` to `master`.
+- GitHub Actions Test And Build run `28342367635` passed for `master` on commit `21552b8`:
+  - `test` passed,
+  - `android-apks` passed,
+  - new `Verify APK artifacts` step passed,
+  - APK artifact upload completed.
+- Tagged and pushed `v0.2.1` at commit `21552b8`.
+- Tag-triggered workflows started:
+  - Release run `28342480249`,
+  - Test And Build run `28342480245`.
+- Tag-triggered Test And Build run `28342480245` passed:
+  - `test` passed,
+  - `android-apks` passed,
+  - `Verify APK artifacts` passed,
+  - APK artifact upload completed.
+- Release workflow run `28342480249` passed:
+  - resolved version `0.2.1`,
+  - tests passed,
+  - both APKs built,
+  - `Verify APK artifacts` passed,
+  - `SHA256SUMS` and release notes were written,
+  - GitHub Release creation passed.
+- Confirmed GitHub Release `v0.2.1` exists:
+  - URL: https://github.com/mjcipriano/hide-fall/releases/tag/v0.2.1
+  - title: `Hidefall 0.2.1`
+  - published: 2026-06-29T01:13:56Z
+  - attached assets: `hidefall-quest-debug.apk`, `hidefall-mobile-debug.apk`, `SHA256SUMS`.
+- Downloaded release assets to `/tmp/hidefall-release-v0.2.1` and verified:
+  - `sha256sum -c SHA256SUMS` passes,
+  - `tools/verify_android_artifacts.sh /tmp/hidefall-release-v0.2.1/hidefall-quest-debug.apk /tmp/hidefall-release-v0.2.1/hidefall-mobile-debug.apk` passes,
+  - downloaded Quest APK signature verifies and contains immersive OpenXR/Quest manifest entries plus packaged Meta OpenXR vendor native files,
+  - downloaded mobile APK signature verifies and remains non-XR.
 
 ## Next
 
-1. Complete and publish the `v0.2.1` Quest XR packaging release, including GitHub Release assets.
-2. Test the `v0.2.1` Quest APK on physical Quest hardware to confirm immersive OpenXR launch and passthrough behavior.
+1. Test the `v0.2.1` Quest APK on physical Quest hardware to confirm immersive OpenXR launch and passthrough behavior.
+2. Test the `v0.2.1` mobile APK on physical Android hardware joining the Quest host over LAN.
 3. Add production release signing secrets/workflow for store-ready signed release APKs/AABs.
 4. Expand simulation tests for reconnect behavior, network interruptions, and deeper bot behavior.
 5. Replace desktop/fallback room approximation with validated Quest room mesh, boundary, passthrough, and scene API behavior after plugin/device verification.
