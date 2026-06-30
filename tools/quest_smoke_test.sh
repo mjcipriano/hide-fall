@@ -27,6 +27,31 @@ adb_file_arg() {
   fi
 }
 
+dismiss_horizon_dialog() {
+  local task_id=""
+  if [[ -f "${ACTIVITY_FILE}" ]]; then
+    task_id="$(tr -d '\r' < "${ACTIVITY_FILE}" | awk '
+      /\* Task\{/ {
+        task = ""
+        if (match($0, /#[0-9]+/)) {
+          task = substr($0, RSTART + 1, RLENGTH - 1)
+        }
+      }
+      /OculusLinkAvailableDialogActivity/ && task != "" {
+        print task
+        exit
+      }
+    ')"
+  fi
+  if [[ -n "${task_id}" ]]; then
+    "${ADB}" shell am stack remove "${task_id}" >/dev/null 2>&1 || true
+  fi
+  "${ADB}" shell input keyevent KEYCODE_DPAD_CENTER >/dev/null 2>&1 || true
+  "${ADB}" shell input keyevent KEYCODE_ENTER >/dev/null 2>&1 || true
+  "${ADB}" shell input keyevent KEYCODE_ESCAPE >/dev/null 2>&1 || true
+  "${ADB}" shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
+}
+
 devices="$("${ADB}" devices | tr -d '\r' | awk 'NR > 1 && $2 == "device" { print $1 }')"
 device_count="$(wc -w <<< "${devices}")"
 if [[ "${device_count}" -ne 1 ]]; then
@@ -42,24 +67,42 @@ mkdir -p "${LOG_DIR}"
 "${ADB}" shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
 "${ADB}" logcat -c
 
-set +e
-"${ADB}" shell monkey -p "${PACKAGE}" -c android.intent.category.LAUNCHER 1 >/dev/null
-launch_status=$?
-set -e
-if [[ "${launch_status}" -ne 0 ]]; then
-  echo "Launch command failed for ${PACKAGE}" >&2
-  "${ADB}" logcat -d -t 400 > "${LOG_FILE}" || true
-  exit 1
-fi
+pid=""
+launch_status=1
+for attempt in 1 2 3; do
+  set +e
+  "${ADB}" shell monkey -p "${PACKAGE}" -c android.intent.category.LAUNCHER 1 >/dev/null
+  launch_status=$?
+  set -e
+  if [[ "${launch_status}" -ne 0 ]]; then
+    echo "Launch command failed for ${PACKAGE} on attempt ${attempt}" >&2
+    "${ADB}" logcat -d -t 400 > "${LOG_FILE}" || true
+    exit 1
+  fi
 
-sleep "${HIDEFALL_QUEST_SMOKE_SECONDS:-12}"
-"${ADB}" logcat -d > "${LOG_FILE}"
-"${ADB}" shell dumpsys activity activities > "${ACTIVITY_FILE}" || true
-"${ADB}" shell dumpsys package "${PACKAGE}" > "${PACKAGE_FILE}" || true
+  sleep "${HIDEFALL_QUEST_SMOKE_SECONDS:-12}"
+  "${ADB}" logcat -d > "${LOG_FILE}"
+  "${ADB}" shell dumpsys activity activities > "${ACTIVITY_FILE}" || true
+  "${ADB}" shell dumpsys package "${PACKAGE}" > "${PACKAGE_FILE}" || true
+  pid="$("${ADB}" shell pidof "${PACKAGE}" | tr -d '\r' || true)"
+  if [[ -n "${pid}" ]]; then
+    break
+  fi
+  if grep -Eq 'Launch is blocked because: a Reprojected OS dialog is currently showing|OculusLinkAvailableDialogActivity' "${LOG_FILE}" "${ACTIVITY_FILE}"; then
+    echo "Quest launch attempt ${attempt} was blocked by a Horizon dialog; dismissing and retrying." >&2
+    dismiss_horizon_dialog
+    sleep 2
+    "${ADB}" logcat -c
+    continue
+  fi
+  break
+done
 
-pid="$("${ADB}" shell pidof "${PACKAGE}" | tr -d '\r' || true)"
 if [[ -z "${pid}" ]]; then
   echo "Quest smoke failed: ${PACKAGE} is not running after launch. Log: ${LOG_FILE}" >&2
+  if grep -Eq 'Launch is blocked because: a Reprojected OS dialog is currently showing|OculusLinkAvailableDialogActivity' "${LOG_FILE}" "${ACTIVITY_FILE}"; then
+    echo "Quest launch is blocked by a Horizon system dialog. Wear/unlock the headset and dismiss the visible dialog, then rerun the smoke test. Activities: ${ACTIVITY_FILE}" >&2
+  fi
   if grep -Eq 'REQUIRES_CONTROLLERS_LAUNCH_CHECK|LaunchCheckControllerRequiredDialogActivity' "${ACTIVITY_FILE}"; then
     echo "Quest launch is blocked by Horizon's controller-required launch check. Wear/unlock the headset and dismiss the system dialog, or connect/wake controllers/hand tracking before retrying. Activities: ${ACTIVITY_FILE}" >&2
   fi
@@ -80,6 +123,12 @@ godot_errors="$(grep -Ein ' E godot[[:space:]]*: ERROR:' "${LOG_FILE}" | grep -E
 if [[ -n "${godot_errors}" ]]; then
 	echo "Quest smoke failed: Godot errors found in ${LOG_FILE}" >&2
 	printf '%s\n' "${godot_errors}" >&2
+	exit 1
+fi
+
+if ! grep -Eq 'Hidefall visible gameplay ready: phase=.*objects=[1-9][0-9]+' "${LOG_FILE}"; then
+	echo "Quest smoke failed: no visible Hidefall gameplay marker with spawned objects was found in ${LOG_FILE}" >&2
+	grep -Ein 'Hidefall visible (gameplay ready|world pending)|OpenXR|passthrough|phase=|objects=' "${LOG_FILE}" >&2 || true
 	exit 1
 fi
 

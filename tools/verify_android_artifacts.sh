@@ -57,6 +57,7 @@ required_quest_entries=(
   'org.khronos.openxr.permission.OPENXR'
   'org.khronos.openxr.permission.OPENXR_SYSTEM'
   'android.hardware.vr.headtracking'
+  'com.oculus.feature.PASSTHROUGH'
   'com.oculus.permission.HAND_TRACKING'
   'oculus.software.handtracking'
   'com.oculus.handtracking.version'
@@ -91,7 +92,7 @@ for pattern in "${required_quest_files[@]}"; do
 done
 "${BUILD_TOOLS_DIR}/aapt" dump xmltree "${mobile_apk}" AndroidManifest.xml > "${mobile_manifest_file}"
 mobile_manifest="$(cat "${mobile_manifest_file}")"
-if grep -Eq 'com.oculus.intent.category.VR|org.khronos.openxr.intent.category.IMMERSIVE_HMD|org.godotengine.plugin.v2.GodotOpenXR|android.hardware.vr.headtracking|oculus.software.handtracking|com.oculus.permission.HAND_TRACKING|org.khronos.openxr.permission.OPENXR' <<< "${mobile_manifest}"; then
+if grep -Eq 'com.oculus.intent.category.VR|org.khronos.openxr.intent.category.IMMERSIVE_HMD|org.godotengine.plugin.v2.GodotOpenXR|android.hardware.vr.headtracking|com.oculus.feature.PASSTHROUGH|oculus.software.handtracking|com.oculus.permission.HAND_TRACKING|org.khronos.openxr.permission.OPENXR' <<< "${mobile_manifest}"; then
   echo "Mobile APK unexpectedly contains XR manifest entries" >&2
   exit 1
 fi

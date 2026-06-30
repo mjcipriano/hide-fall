@@ -28,6 +28,7 @@ var trigger_was_pressed := false
 var grip_was_pressed := false
 var scan_was_pressed := false
 var last_scan_text := "scan ready"
+var launch_gameplay_logged := false
 
 var camera: Camera3D
 var xr_origin: XROrigin3D
@@ -43,6 +44,10 @@ var xr_hud_label: Label3D
 var xr_help_label: Label3D
 var xr_qr_sprite: Sprite3D
 var xr_crosshair: MeshInstance3D
+var xr_phase_label: Label3D
+var xr_blackout_panel: MeshInstance3D
+var xr_hand_menu_root: Node3D
+var xr_hand_menu_label: Label3D
 var world_environment: WorldEnvironment
 var arena_root: Node3D
 var object_root: Node3D
@@ -63,8 +68,11 @@ func _ready() -> void:
 	simulation.add_bot_hiders(2)
 	_build_world()
 	_build_hud()
+	if _should_auto_start_solo_round():
+		_start_visible_solo_round()
 	if auto_start_network:
 		_start_network_host()
+	_log_visible_gameplay_state()
 
 
 func _process(delta: float) -> void:
@@ -74,6 +82,8 @@ func _process(delta: float) -> void:
 	_update_held_object()
 	_update_xr_pointer_dot()
 	simulation.advance(delta)
+	if _is_xr_active() and not launch_gameplay_logged and simulation.objects.size() > 0:
+		_log_visible_gameplay_state()
 	_send_periodic_snapshots(delta)
 	_update_objects()
 	_update_hud()
@@ -131,6 +141,26 @@ func _build_world() -> void:
 	boundary_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	boundary.material_override = boundary_material
 	arena_root.add_child(boundary)
+
+	var title := Label3D.new()
+	title.name = "ArenaTitle"
+	title.text = "HIDEFALL"
+	title.font_size = 72
+	title.outline_size = 12
+	title.pixel_size = 0.0032
+	title.modulate = Color(0.3, 0.95, 1.0, 1.0)
+	title.position = Vector3(0.0, 1.35, -2.15)
+	arena_root.add_child(title)
+
+	var start_hint := Label3D.new()
+	start_hint.name = "ArenaHint"
+	start_hint.text = "A starts the hunt. Trigger shoots. Grip picks up props."
+	start_hint.font_size = 32
+	start_hint.outline_size = 8
+	start_hint.pixel_size = 0.0024
+	start_hint.modulate = Color(1.0, 1.0, 1.0, 1.0)
+	start_hint.position = Vector3(0.0, 0.95, -2.15)
+	arena_root.add_child(start_hint)
 
 	var light := DirectionalLight3D.new()
 	light.name = "KeyLight"
@@ -215,12 +245,24 @@ func _build_hud() -> void:
 func _build_xr_hud() -> void:
 	xr_hud_root = Node3D.new()
 	xr_hud_root.name = "XRWorldHud"
-	xr_hud_root.position = Vector3(-1.4, 1.55, -2.15)
-	add_child(xr_hud_root)
+	xr_hud_root.position = Vector3(-0.88, -0.30, -2.25)
+	if camera != null:
+		camera.add_child(xr_hud_root)
+	else:
+		add_child(xr_hud_root)
+
+	var status_panel := MeshInstance3D.new()
+	status_panel.name = "StatusPanel"
+	var status_panel_mesh := QuadMesh.new()
+	status_panel_mesh.size = Vector2(2.25, 0.82)
+	status_panel.mesh = status_panel_mesh
+	status_panel.position = Vector3(0.78, 0.05, 0.035)
+	status_panel.material_override = _hud_panel_material(Color(0.02, 0.03, 0.04, 0.78))
+	xr_hud_root.add_child(status_panel)
 
 	xr_hud_label = Label3D.new()
 	xr_hud_label.name = "StatusText"
-	xr_hud_label.font_size = 28
+	xr_hud_label.font_size = 24
 	xr_hud_label.outline_size = 8
 	xr_hud_label.modulate = Color(0.92, 0.98, 1.0, 1.0)
 	xr_hud_label.pixel_size = 0.0022
@@ -242,12 +284,42 @@ func _build_xr_hud() -> void:
 	xr_help_label.text = "A: start/confirm/scan  |  Trigger: shoot  |  Grip: pick up/drop"
 	xr_hud_root.add_child(xr_help_label)
 
+	var phase_panel := MeshInstance3D.new()
+	phase_panel.name = "PhasePanel"
+	var phase_panel_mesh := QuadMesh.new()
+	phase_panel_mesh.size = Vector2(1.45, 0.34)
+	phase_panel.mesh = phase_panel_mesh
+	phase_panel.position = Vector3(1.12, 0.62, 0.03)
+	phase_panel.material_override = _hud_panel_material(Color(0.0, 0.12, 0.16, 0.82))
+	xr_hud_root.add_child(phase_panel)
+
+	xr_phase_label = Label3D.new()
+	xr_phase_label.name = "PhaseText"
+	xr_phase_label.font_size = 36
+	xr_phase_label.outline_size = 8
+	xr_phase_label.pixel_size = 0.0022
+	xr_phase_label.width = 620.0
+	xr_phase_label.position = Vector3(0.48, 0.71, 0.0)
+	xr_phase_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	xr_phase_label.modulate = Color(1.0, 0.92, 0.35, 1.0)
+	xr_hud_root.add_child(xr_phase_label)
+
 	xr_qr_sprite = Sprite3D.new()
 	xr_qr_sprite.name = "JoinQr"
 	xr_qr_sprite.pixel_size = 0.0021
 	xr_qr_sprite.position = Vector3(1.45, 0.10, 0.0)
 	xr_qr_sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	xr_hud_root.add_child(xr_qr_sprite)
+
+	xr_blackout_panel = MeshInstance3D.new()
+	xr_blackout_panel.name = "BlackoutPanel"
+	var blackout_mesh := QuadMesh.new()
+	blackout_mesh.size = Vector2(3.4, 2.0)
+	xr_blackout_panel.mesh = blackout_mesh
+	xr_blackout_panel.position = Vector3(0.78, 0.0, -0.08)
+	xr_blackout_panel.visible = false
+	xr_blackout_panel.material_override = _hud_panel_material(Color(0.0, 0.0, 0.0, 0.72))
+	xr_hud_root.add_child(xr_blackout_panel)
 
 	xr_crosshair = MeshInstance3D.new()
 	xr_crosshair.name = "PointerDot"
@@ -261,6 +333,46 @@ func _build_xr_hud() -> void:
 	crosshair_material.emission = Color(1.0, 1.0, 1.0)
 	xr_crosshair.material_override = crosshair_material
 	add_child(xr_crosshair)
+	_build_hand_menu()
+
+
+func _build_hand_menu() -> void:
+	if left_controller == null:
+		return
+	xr_hand_menu_root = Node3D.new()
+	xr_hand_menu_root.name = "LeftHandMenu"
+	xr_hand_menu_root.position = Vector3(0.06, 0.10, -0.12)
+	xr_hand_menu_root.rotation_degrees = Vector3(-62.0, 8.0, 0.0)
+	left_controller.add_child(xr_hand_menu_root)
+
+	var wrist_panel := MeshInstance3D.new()
+	wrist_panel.name = "WristPanel"
+	var wrist_mesh := QuadMesh.new()
+	wrist_mesh.size = Vector2(0.64, 0.36)
+	wrist_panel.mesh = wrist_mesh
+	wrist_panel.material_override = _hud_panel_material(Color(0.01, 0.03, 0.05, 0.86))
+	xr_hand_menu_root.add_child(wrist_panel)
+
+	xr_hand_menu_label = Label3D.new()
+	xr_hand_menu_label.name = "WristText"
+	xr_hand_menu_label.font_size = 22
+	xr_hand_menu_label.outline_size = 5
+	xr_hand_menu_label.pixel_size = 0.0016
+	xr_hand_menu_label.width = 360.0
+	xr_hand_menu_label.position = Vector3(-0.29, 0.13, 0.004)
+	xr_hand_menu_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	xr_hand_menu_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	xr_hand_menu_label.modulate = Color(0.9, 1.0, 1.0, 1.0)
+	xr_hand_menu_root.add_child(xr_hand_menu_label)
+
+
+func _hud_panel_material(color: Color) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.no_depth_test = true
+	return material
 
 
 func _handle_input() -> void:
@@ -356,6 +468,25 @@ func _update_hud() -> void:
 		hud_label.text = status_text
 	if xr_hud_label != null:
 		xr_hud_label.text = status_text
+	if xr_phase_label != null:
+		xr_phase_label.text = _phase_instruction_text()
+	if xr_blackout_panel != null:
+		xr_blackout_panel.visible = simulation.phase == HidefallSimulationScript.PHASE_BLACKOUT
+	_update_hand_menu()
+
+
+func _update_hand_menu() -> void:
+	if xr_hand_menu_root == null or xr_hand_menu_label == null:
+		return
+	xr_hand_menu_root.visible = left_controller != null and left_controller.get_is_active()
+	xr_hand_menu_label.text = "%s\nTime %.0f  Shots %d\nScans %d  Props %d\nRoom %s" % [
+		_phase_instruction_text(),
+		float(simulation.get_state_snapshot(local_hider_id)["time_remaining"]),
+		simulation.shots_remaining,
+		simulation.scan_pulses_remaining,
+		simulation.objects.size(),
+		simulation.room_id
+	]
 
 
 func get_join_payload_text() -> String:
@@ -564,8 +695,63 @@ func _activate_primary_action() -> void:
 			_rebuild_objects()
 
 
+func _start_visible_solo_round() -> void:
+	if simulation.phase != HidefallSimulationScript.PHASE_LOBBY:
+		return
+	if simulation.start_round():
+		simulation.confirm_room_setup()
+		_rebuild_objects()
+		network_status = "solo bot round running"
+		last_scan_text = "objects raining now"
+		_log_visible_gameplay_state()
+
+
+func _should_auto_start_solo_round() -> bool:
+	if not _is_xr_active():
+		return false
+	if OS.get_environment("HIDEFALL_QUEST_STAY_IN_LOBBY") == "1":
+		return false
+	if OS.get_environment("HIDEFALL_DISABLE_SOLO_AUTOSTART") == "1":
+		return false
+	return true
+
+
 func _is_xr_active() -> bool:
 	return xr_origin != null and get_viewport().use_xr
+
+
+func _phase_instruction_text() -> String:
+	match simulation.phase:
+		HidefallSimulationScript.PHASE_LOBBY:
+			return "LOBBY - press A to start"
+		HidefallSimulationScript.PHASE_ROOM_SETUP:
+			return "SETUP - confirm play space"
+		HidefallSimulationScript.PHASE_OBJECT_RAIN:
+			return "OBJECT RAIN - props are falling"
+		HidefallSimulationScript.PHASE_BLACKOUT:
+			return "BLACKOUT - hiders are hiding"
+		HidefallSimulationScript.PHASE_SEEK:
+			return "HUNT - find the live props"
+		HidefallSimulationScript.PHASE_RESULTS:
+			return "RESULTS - press A to rematch"
+	return "HIDEFALL"
+
+
+func _log_visible_gameplay_state() -> void:
+	var object_count: int = 0
+	if simulation != null:
+		object_count = simulation.objects.size()
+	var marker := "Hidefall visible gameplay ready" if object_count > 0 else "Hidefall visible world pending"
+	print("%s: phase=%s objects=%d object_nodes=%d xr=%s network=%s" % [
+		marker,
+		simulation.phase if simulation != null else "none",
+		object_count,
+		object_nodes.size(),
+		xr_runtime_status,
+		network_status
+	])
+	if object_count > 0:
+		launch_gameplay_logged = true
 
 
 func _mesh_for_shape(shape_id: String) -> Mesh:

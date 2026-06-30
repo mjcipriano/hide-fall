@@ -85,6 +85,7 @@ def patch_manifest() -> None:
     ensure_openxr_queries(root)
     ensure_uses_feature(root, "android.hardware.vr.headtracking", required="true", version="1")
     ensure_uses_feature(root, "oculus.software.handtracking", required="false")
+    ensure_uses_feature(root, "com.oculus.feature.PASSTHROUGH", required="true")
     ensure_uses_permission(root, "org.khronos.openxr.permission.OPENXR")
     ensure_uses_permission(root, "org.khronos.openxr.permission.OPENXR_SYSTEM")
     ensure_uses_permission(root, "com.oculus.permission.HAND_TRACKING")
@@ -228,8 +229,17 @@ tasks.register('ensureQuestVrManifest') {
                 return
             }
             def androidName = new groovy.xml.QName('http://schemas.android.com/apk/res/android', 'name', 'android')
+            def androidRequired = new groovy.xml.QName('http://schemas.android.com/apk/res/android', 'required', 'android')
             def parser = new XmlParser(false, true)
             def manifest = parser.parse(manifestFile)
+            def passthroughFeature = manifest.'uses-feature'.find { feature ->
+                feature.attributes()[androidName] == 'com.oculus.feature.PASSTHROUGH'
+            }
+            if (passthroughFeature == null) {
+                passthroughFeature = manifest.appendNode('uses-feature')
+                passthroughFeature.attributes()[androidName] = 'com.oculus.feature.PASSTHROUGH'
+            }
+            passthroughFeature.attributes()[androidRequired] = 'true'
             def application = manifest.application[0]
             def alias = application.'activity-alias'.find { node ->
                 def nodeName = node.attributes()[androidName] as String

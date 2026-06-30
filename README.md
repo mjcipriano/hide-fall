@@ -4,7 +4,7 @@ Hidefall is a Godot 4 mixed-reality prop-hunt party game prototype. The target p
 
 ## Current Build
 
-- Engine: Godot `4.7-stable`
+- Engine: Godot `4.6.2-stable`
 - Primary project: `game/project.godot`
 - Local verification: `make test`
 - APK verification: `make build-apks`
@@ -28,7 +28,7 @@ Godot itself is installed by `make install-godot` into `tools/godot/` from the o
 make run
 ```
 
-The current executable scene is a Godot prototype of the Quest host experience. It starts in a lobby, runs a WebSocket LAN host, shows a QR join code plus manual payload, waits for joined hiders to ready up, and begins a round when `R` is pressed. The Quest export is an immersive OpenXR APK using the Godot OpenXR Vendors Meta plugin, Quest/OpenXR manifest categories, Quest 3/3S support metadata, and passthrough blend mode. On headset it initializes an `XROrigin3D`, headset camera, controller nodes, and world-space HUD; on desktop/headless it falls back to a normal camera and CanvasLayer HUD for local testing.
+The current executable scene is a Godot prototype of the Quest host experience. On headset it launches directly into a solo bot round with visible falling props, an immersive OpenXR/MR view, a head-locked status panel, and a left-hand wrist menu. It also runs a WebSocket LAN host, shows a QR join code plus manual payload, and supports joined phone hiders. On desktop/headless it starts in a lobby with a normal camera and CanvasLayer HUD for local testing.
 
 Implemented gameplay includes lobby ready gating, room setup confirmation, object rain, blackout, seek, results/rematch, hider movement and freeze, shape/color disguise changes, bot hider behavior, pickup/drop inspection, limited seeker shots, a limited scan pulse, late-join spectators, scoring, and LAN phone client snapshots.
 

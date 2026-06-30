@@ -74,7 +74,7 @@ func _test_content_loads() -> void:
 func _test_project_xr_startup_settings() -> void:
 	_assert(ProjectSettings.get_setting("xr/openxr/enabled", false), "OpenXR project startup is enabled")
 	_assert(int(ProjectSettings.get_setting("xr/openxr/environment_blend_mode", 0)) == 0, "OpenXR starts in opaque blend mode")
-	_assert(not bool(ProjectSettings.get_setting("xr/openxr/extensions/meta/passthrough", false)), "Meta passthrough is not requested during OpenXR startup")
+	_assert(bool(ProjectSettings.get_setting("xr/openxr/extensions/meta/passthrough", false)), "Meta passthrough extension is enabled")
 
 
 func _test_qr_code_generation() -> void:
@@ -228,6 +228,12 @@ func _test_host_scene_smoke() -> void:
 	_assert(not scene.get_join_payload_text().is_empty(), "host scene creates join payload")
 	_assert(scene.get_join_payload_text().to_utf8_buffer().size() <= 106, "host join payload fits QR capacity")
 	_assert(scene.qr_texture_rect.texture != null, "host scene creates join QR texture")
+	scene._start_visible_solo_round()
+	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_OBJECT_RAIN, "host scene can start a visible solo round")
+	_assert(scene.object_nodes.size() >= 75, "visible solo round creates prop nodes immediately")
+	scene.simulation._set_phase(HidefallSimulationScript.PHASE_LOBBY)
+	scene.simulation.objects.clear()
+	scene._rebuild_objects()
 	var fake_host := FakeNetworkHost.new()
 	scene.network_host = fake_host
 	scene._handle_join_request(7, {

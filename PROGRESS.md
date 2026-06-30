@@ -468,26 +468,7 @@ This file is the handoff point for future agents. Keep it current before and aft
   - `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 make verify-apks` passed,
   - headset install-over and immersive launch succeeded,
   - runtime had the same repeated Godot render errors as 4.6.3.
-- Began testing whether switching from Forward Mobile to Forward+ avoids the headset render errors:
-  - changed `game/project.godot` to `renderer/rendering_method="forward_plus"`,
-  - first build reused stale Godot cache and still logged `renderer: mobile (ProjectSettings)`,
-  - stopped the app and ran `make clean-godot`,
-  - the next signed `make build-quest-apk` command was blocked by the platform usage limit before it could run.
-
-## Next
-
-1. After the platform usage limit resets, run:
-   `set -a; source /tmp/hidefall-upload-signing.env; set +a; source "$HOME/miniconda3/bin/activate" hidefall && make build-quest-apk`
-2. Immediately restore signing placeholders in `game/export_presets.cfg`.
-3. Run Quest smoke:
-   `ADB=/mnt/c/Users/mcipr/AppData/Local/Android/Sdk/platform-tools/adb.exe HIDEFALL_QUEST_SMOKE_SECONDS=12 tools/quest_smoke_test.sh build/hidefall-quest.apk`
-4. Inspect `build/quest-smoke/quest-smoke-logcat.txt`:
-   - if it now logs `renderer: forward_plus` and Godot render errors disappear, keep Forward+, build mobile, verify APKs, run full tests, commit/push/tag/release,
-   - if it still logs render errors, revert to `mobile` renderer and isolate scene features next, starting with temporarily disabling `Label3D`, `Sprite3D`, transparent materials, and `WorldEnvironment` setup in `game/scripts/quest/seeker/host_prototype.gd`.
-5. Do not ship until a signed APK passes:
-   - `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 make verify-apks`,
-   - `make test`,
-   - Quest smoke over ADB with no app crash and no unignored Godot errors.
+- Began testing whether switching from Forward Mobile to Forward+ avoids the headset render errors, but did not ship that direction. The final working path is Godot `4.6.2-stable` plus `renderer/rendering_method="gl_compatibility"`.
 
 ## 2026-06-30 Compatibility Renderer Pass
 
@@ -533,8 +514,40 @@ This file is the handoff point for future agents. Keep it current before and aft
   - process stayed running,
   - log saved to `build/quest-smoke/quest-smoke-logcat.txt`.
 
+## 2026-06-30 v0.2.4 Gameplay/MR Fix
+
+- Fixed the Quest app launching into an effectively empty lobby:
+  - headset launches now auto-start a solo bot round,
+  - 78 props are spawned and visible immediately in object-rain phase,
+  - desktop/headless local tests still start in lobby for deterministic testing.
+- Added persistent XR UI:
+  - head-locked status panel and phase banner,
+  - QR/status fallback remains in the larger panel,
+  - left-controller wrist menu shows phase, time, shots, scans, prop count, and room code.
+- Enabled the Meta passthrough path:
+  - `xr/openxr/extensions/meta/passthrough=true`,
+  - Quest export `meta_xr_features/passthrough=true`,
+  - Android template patcher now adds required `com.oculus.feature.PASSTHROUGH`,
+  - APK verifier fails if Quest APK lacks passthrough or mobile APK contains XR/passthrough metadata.
+- Hardened Quest smoke:
+  - requires `Hidefall visible gameplay ready: ... objects=...`,
+  - dismisses/removes the Quest Link reprojected OS dialog when it blocks ADB-launched apps,
+  - still fails on app death, crash/OpenXR startup errors, and unignored Godot errors.
+- Bumped Android version to `0.2.4` / code `6`.
+- Local validation passed:
+  - `make test`,
+  - signed `make build-apks`,
+  - `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 make verify-apks`,
+  - `git diff --check`.
+- Quest smoke passed over Windows ADB for `build/hidefall-quest.apk`:
+  - install-over succeeded,
+  - process stayed running,
+  - log showed `Hidefall visible gameplay ready: phase=object_rain objects=78 object_nodes=78 xr=OpenXR immersive passthrough`,
+  - manifest showed `versionCode=6`, `versionName=0.2.4`, and `com.oculus.feature.PASSTHROUGH`.
+
 ## Next
 
-1. No release-blocking work is open for `v0.2.3`.
-2. If the user reports another headset issue, start from `build/quest-smoke/quest-smoke-logcat.txt`, rerun the released APK smoke test, and compare against the passing `v0.2.3` release artifacts.
-3. Non-blocking cleanup: update GitHub Actions setup-miniconda options to remove deprecation annotations for `auto-activate-base` and implicit `defaults` channel.
+1. Commit and push the `0.2.4` gameplay/MR fix.
+2. Watch GitHub Actions.
+3. Tag and release `v0.2.4`.
+4. Download release assets, verify checksums/APK metadata, and smoke-test the released Quest APK over ADB.
