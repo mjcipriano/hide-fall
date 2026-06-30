@@ -220,10 +220,52 @@ This file is the handoff point for future agents. Keep it current before and aft
   - downloaded Quest APK signature verifies and contains immersive OpenXR/Quest manifest entries plus packaged Meta OpenXR vendor native files,
   - downloaded mobile APK signature verifies and remains non-XR.
 
+## 2026-06-29
+
+- User installed `v0.2.1` on Quest and reported two release blockers:
+  - package could not be installed over the previous version without uninstalling,
+  - Quest app starts and immediately stops.
+- Confirmed signing root cause:
+  - `v0.2.0` Quest release cert SHA-256 was `e50a6184078b2dfa0796499279f38458f39aff0ec71652a8d2a3038efca483a0`,
+  - `v0.2.1` Quest release cert SHA-256 was `02fab2dc3178426bd90df0c8060cebccc0fca52bbc280f50960773faa5cce424`,
+  - CI had generated a fresh debug keystore per release, so Android correctly rejected upgrade installs.
+- Created persistent Hidefall upload signing key and stored it in GitHub Secrets:
+  - `HIDEFALL_ANDROID_KEYSTORE_BASE64`,
+  - `HIDEFALL_ANDROID_KEYSTORE_PASSWORD`,
+  - `HIDEFALL_ANDROID_KEY_ALIAS`,
+  - `HIDEFALL_ANDROID_KEY_PASSWORD`,
+  - `HIDEFALL_ANDROID_CERT_SHA256`.
+- Committed public upload certificate SHA-256 fingerprint in `tools/android-signing-cert.sha256`: `9359b8114e04f13b7e6bf3b626be57c8d1e3e195eb67cb86d908122694f414aa`.
+- Added CI/release signing support:
+  - `tools/configure_godot_android.py` now decodes secret keystore bytes when present and patches Android export signing settings for the build,
+  - `tools/require_release_signing.sh` fails release CI if any signing secret is missing,
+  - Release workflow passes the signing secrets and runs `make require-release-signing`,
+  - Test And Build workflow passes signing secrets when available, so push builds verify the upload key too,
+  - `tools/verify_android_artifacts.sh` now verifies Quest/mobile APKs use the same cert and enforces `HIDEFALL_ANDROID_CERT_SHA256` when present.
+- Startup crash hardening for `v0.2.2`:
+  - bumped Android version metadata to `0.2.2` / code `4`,
+  - changed OpenXR startup blend mode from alpha blend to opaque,
+  - disabled Meta passthrough at project/export startup,
+  - gated runtime passthrough negotiation behind the project passthrough setting,
+  - added Godot tests asserting OpenXR is enabled but starts opaque and does not request Meta passthrough during startup.
+- Added `tools/quest_smoke_test.sh` and `make smoke-quest-apk`:
+  - requires one authorized Quest/Android device visible to ADB,
+  - installs with `adb install -r -d`,
+  - launches the package,
+  - captures logcat to `build/quest-smoke/quest-smoke-logcat.txt`,
+  - fails if the package is not running after launch or crash/OpenXR error markers appear.
+- Checked ADB locally; no Quest device was connected/authorized, so live logcat crash diagnosis could not be pulled from this machine.
+- Local verification after signing/startup changes:
+  - `conda run -n hidefall make test` passes,
+  - `conda run -n hidefall make build-apks` passes outside the sandbox,
+  - `conda run -n hidefall make verify-apks` passes,
+  - `source /tmp/hidefall-upload-signing.env && make require-release-signing` passes for the temporary local copy of the same signing env that was written to GitHub Secrets.
+
 ## Next
 
-1. Test the `v0.2.1` Quest APK on physical Quest hardware to confirm immersive OpenXR launch and passthrough behavior.
-2. Test the `v0.2.1` mobile APK on physical Android hardware joining the Quest host over LAN.
-3. Add production release signing secrets/workflow for store-ready signed release APKs/AABs.
-4. Expand simulation tests for reconnect behavior, network interruptions, and deeper bot behavior.
-5. Replace desktop/fallback room approximation with validated Quest room mesh, boundary, passthrough, and scene API behavior after plugin/device verification.
+1. Commit, push, and release `v0.2.2` with persistent upload-key signing.
+2. Confirm CI verifies `HIDEFALL_ANDROID_CERT_SHA256` on both APKs.
+3. Download `v0.2.2` release assets and verify checksums/APK artifact contents.
+4. Run `make smoke-quest-apk` with a connected Quest before headset testing when hardware is available.
+5. Test `v0.2.2` on Quest; one uninstall may be required when moving from `v0.2.1` to the first upload-key-signed build, but later builds should install over it.
+6. Re-enable passthrough only after an ADB smoke test proves the opaque immersive VR startup path works on Quest.

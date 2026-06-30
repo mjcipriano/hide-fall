@@ -5,6 +5,12 @@ ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-tools/android-sdk}"
 ANDROID_SDK_ROOT="$(python -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "${ANDROID_SDK_ROOT}")"
 BUILD_TOOLS_VERSION="${ANDROID_BUILD_TOOLS_VERSION:-36.1.0}"
 BUILD_TOOLS_DIR="${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS_VERSION}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+EXPECTED_VERSION_NAME="${HIDEFALL_EXPECTED_VERSION_NAME:-$(grep -m1 '^version/name=' "${ROOT}/game/export_presets.cfg" | sed -E 's/version\/name="([^"]+)"/\1/')}"
+EXPECTED_CERT_SHA256="${HIDEFALL_ANDROID_CERT_SHA256:-}"
+if [[ -z "${EXPECTED_CERT_SHA256}" && "${HIDEFALL_ENFORCE_UPLOAD_SIGNING:-0}" == "1" && -f "${ROOT}/tools/android-signing-cert.sha256" ]]; then
+  EXPECTED_CERT_SHA256="$(tr -d '[:space:]' < "${ROOT}/tools/android-signing-cert.sha256")"
+fi
 
 if [[ ! -x "${BUILD_TOOLS_DIR}/apksigner" || ! -x "${BUILD_TOOLS_DIR}/aapt" ]]; then
   echo "Android build tools ${BUILD_TOOLS_VERSION} not found under ${ANDROID_SDK_ROOT}" >&2
@@ -20,9 +26,26 @@ test -f "${mobile_apk}"
 "${BUILD_TOOLS_DIR}/apksigner" verify --verbose "${quest_apk}"
 "${BUILD_TOOLS_DIR}/apksigner" verify --verbose "${mobile_apk}"
 
+quest_cert="$("${BUILD_TOOLS_DIR}/apksigner" verify --print-certs "${quest_apk}")"
+mobile_cert="$("${BUILD_TOOLS_DIR}/apksigner" verify --print-certs "${mobile_apk}")"
+quest_cert_sha="$(sed -n 's/Signer #1 certificate SHA-256 digest: //p' <<< "${quest_cert}")"
+mobile_cert_sha="$(sed -n 's/Signer #1 certificate SHA-256 digest: //p' <<< "${mobile_cert}")"
+if [[ "${quest_cert_sha}" != "${mobile_cert_sha}" ]]; then
+  echo "Quest and mobile APKs are signed by different certificates" >&2
+  echo "Quest:  ${quest_cert_sha}" >&2
+  echo "Mobile: ${mobile_cert_sha}" >&2
+  exit 1
+fi
+if [[ -n "${EXPECTED_CERT_SHA256}" && "${quest_cert_sha,,}" != "${EXPECTED_CERT_SHA256,,}" ]]; then
+  echo "APK signing certificate does not match expected upload certificate" >&2
+  echo "Expected: ${EXPECTED_CERT_SHA256}" >&2
+  echo "Actual:   ${quest_cert_sha}" >&2
+  exit 1
+fi
+
 quest_manifest="$("${BUILD_TOOLS_DIR}/aapt" dump xmltree "${quest_apk}" AndroidManifest.xml)"
 required_quest_entries=(
-  'android:versionName.*"0.2.1"'
+  "android:versionName.*\"${EXPECTED_VERSION_NAME}\""
   'org.khronos.openxr.permission.OPENXR'
   'org.khronos.openxr.permission.OPENXR_SYSTEM'
   'android.hardware.vr.headtracking'
@@ -59,8 +82,8 @@ if grep -Eq 'com.oculus.intent.category.VR|org.khronos.openxr.intent.category.IM
   echo "Mobile APK unexpectedly contains XR manifest entries" >&2
   exit 1
 fi
-if ! grep -Eq 'android:versionName.*"0.2.1"' <<< "${mobile_manifest}"; then
-  echo "Mobile APK versionName is not 0.2.1" >&2
+if ! grep -Eq "android:versionName.*\"${EXPECTED_VERSION_NAME}\"" <<< "${mobile_manifest}"; then
+  echo "Mobile APK versionName is not ${EXPECTED_VERSION_NAME}" >&2
   exit 1
 fi
 

@@ -498,6 +498,12 @@ func _configure_xr_passthrough() -> void:
 	var openxr = XRServer.find_interface("OpenXR")
 	if openxr == null:
 		return
+	if not bool(ProjectSettings.get_setting("xr/openxr/extensions/meta/passthrough", false)):
+		get_viewport().transparent_bg = false
+		world_environment.environment.background_mode = Environment.BG_SKY
+		openxr.environment_blend_mode = XRInterface.XR_ENV_BLEND_MODE_OPAQUE
+		xr_runtime_status += " opaque"
+		return
 	var supported_modes: Array = openxr.get_supported_environment_blend_modes()
 	if supported_modes.has(XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND):
 		get_viewport().transparent_bg = true

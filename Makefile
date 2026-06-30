@@ -12,7 +12,7 @@ export ANDROID_SDK_ROOT
 export ANDROID_HOME
 export JAVA_HOME
 
-.PHONY: install-godot install-export-templates install-android-sdk ensure-android-sdk create-debug-keystore configure-android-export prepare-android-xr-template build-apks build-quest-apk build-mobile-apk verify-apks godot-version validate test run clean-godot
+.PHONY: install-godot install-export-templates install-android-sdk ensure-android-sdk create-debug-keystore configure-android-export prepare-android-xr-template require-release-signing build-apks build-quest-apk build-mobile-apk verify-apks smoke-quest-apk godot-version validate test run clean-godot
 
 install-godot:
 	mkdir -p tools/godot
@@ -38,6 +38,9 @@ configure-android-export: ensure-android-sdk create-debug-keystore
 prepare-android-xr-template:
 	env $(GODOT_ENV) python tools/prepare_android_xr_template.py
 
+require-release-signing:
+	tools/require_release_signing.sh
+
 godot-version:
 	$(GODOT_BIN) --version
 
@@ -62,6 +65,9 @@ build-mobile-apk: configure-android-export
 
 verify-apks:
 	tools/verify_android_artifacts.sh
+
+smoke-quest-apk:
+	tools/quest_smoke_test.sh build/hidefall-quest-debug.apk
 
 clean-godot:
 	rm -rf game/.godot

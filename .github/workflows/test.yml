@@ -23,6 +23,12 @@ jobs:
 
   android-apks:
     runs-on: ubuntu-latest
+    env:
+      HIDEFALL_ANDROID_KEYSTORE_BASE64: ${{ secrets.HIDEFALL_ANDROID_KEYSTORE_BASE64 }}
+      HIDEFALL_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.HIDEFALL_ANDROID_KEYSTORE_PASSWORD }}
+      HIDEFALL_ANDROID_KEY_ALIAS: ${{ secrets.HIDEFALL_ANDROID_KEY_ALIAS }}
+      HIDEFALL_ANDROID_KEY_PASSWORD: ${{ secrets.HIDEFALL_ANDROID_KEY_PASSWORD }}
+      HIDEFALL_ANDROID_CERT_SHA256: ${{ secrets.HIDEFALL_ANDROID_CERT_SHA256 }}
     steps:
       - uses: actions/checkout@v4
       - uses: conda-incubator/setup-miniconda@v3

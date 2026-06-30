@@ -30,6 +30,7 @@ func _init() -> void:
 func _run() -> void:
 	Engine.max_fps = 0
 	_test_content_loads()
+	_test_project_xr_startup_settings()
 	_test_qr_code_generation()
 	_test_network_validation()
 	_test_phase_transitions()
@@ -68,6 +69,12 @@ func _test_content_loads() -> void:
 	_assert(bool(config.get_value("seeker", "scan_pulse_enabled", false)), "scan pulse is enabled in default config")
 	_assert(content.get_shape_ids().size() >= 12, "MVP shape set loads")
 	_assert(content.get_color_ids().size() >= 12, "MVP color set loads")
+
+
+func _test_project_xr_startup_settings() -> void:
+	_assert(ProjectSettings.get_setting("xr/openxr/enabled", false), "OpenXR project startup is enabled")
+	_assert(int(ProjectSettings.get_setting("xr/openxr/environment_blend_mode", 0)) == 0, "OpenXR starts in opaque blend mode")
+	_assert(not bool(ProjectSettings.get_setting("xr/openxr/extensions/meta/passthrough", false)), "Meta passthrough is not requested during OpenXR startup")
 
 
 func _test_qr_code_generation() -> void:

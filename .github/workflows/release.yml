@@ -17,6 +17,12 @@ permissions:
 jobs:
   release-apks:
     runs-on: ubuntu-latest
+    env:
+      HIDEFALL_ANDROID_KEYSTORE_BASE64: ${{ secrets.HIDEFALL_ANDROID_KEYSTORE_BASE64 }}
+      HIDEFALL_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.HIDEFALL_ANDROID_KEYSTORE_PASSWORD }}
+      HIDEFALL_ANDROID_KEY_ALIAS: ${{ secrets.HIDEFALL_ANDROID_KEY_ALIAS }}
+      HIDEFALL_ANDROID_KEY_PASSWORD: ${{ secrets.HIDEFALL_ANDROID_KEY_PASSWORD }}
+      HIDEFALL_ANDROID_CERT_SHA256: ${{ secrets.HIDEFALL_ANDROID_CERT_SHA256 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,6 +65,10 @@ jobs:
         shell: bash -el {0}
         run: make install-android-sdk
 
+      - name: Require release signing secrets
+        shell: bash -el {0}
+        run: make require-release-signing
+
       - name: Run tests
         shell: bash -el {0}
         run: make test
@@ -79,7 +89,7 @@ jobs:
           cat > "RELEASE_NOTES.md" <<EOF
           # Hidefall ${{ steps.version.outputs.version }}
 
-          Debug APKs built from tag `${{ steps.version.outputs.tag }}`.
+          APKs built from tag `${{ steps.version.outputs.tag }}` and signed with the project upload key.
 
           ## Assets
 
@@ -87,7 +97,7 @@ jobs:
           - `hidefall-mobile-debug.apk`: Android hider client build.
           - `SHA256SUMS`: SHA-256 checksums for both APKs.
 
-          These are debug-signed APKs for installation/testing. Release signing is intentionally separate until production signing credentials are configured.
+          These APKs use the persistent Hidefall upload signing key from GitHub Secrets so upgrades install over earlier builds signed by the same key.
           EOF
 
       - name: Create GitHub release

@@ -72,6 +72,8 @@ Outputs:
 - `build/hidefall-quest-debug.apk`
 - `build/hidefall-mobile-debug.apk`
 
-The Quest APK uses the generated Android Gradle template so the Meta OpenXR vendor AAR and native plugin are packaged. The Mobile APK remains a normal flat Android hider client with OpenXR disabled.
+The Quest APK uses the generated Android Gradle template so the Meta OpenXR vendor AAR and native plugin are packaged. Release builds use a persistent upload key from GitHub Secrets so upgrades can install over earlier builds signed by that key. The Mobile APK remains a normal flat Android hider client with OpenXR disabled.
+
+If a Quest is connected through authorized ADB, run `make smoke-quest-apk` after building. It installs, launches, captures logcat, and fails if the app exits or logs crash/OpenXR startup errors.
 
 Release signing and store packaging are intentionally separate from the debug APK path because signing credentials must not be committed.
