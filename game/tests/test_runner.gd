@@ -226,6 +226,7 @@ func _test_host_scene_smoke() -> void:
 	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_LOBBY, "host scene starts in lobby")
 	scene._update_hud()
 	_assert(not scene.get_join_payload_text().is_empty(), "host scene creates join payload")
+	_assert(scene.get_join_payload_text().to_utf8_buffer().size() <= 106, "host join payload fits QR capacity")
 	_assert(scene.qr_texture_rect.texture != null, "host scene creates join QR texture")
 	var fake_host := FakeNetworkHost.new()
 	scene.network_host = fake_host

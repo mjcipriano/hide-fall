@@ -17,8 +17,8 @@ if [[ ! -x "${BUILD_TOOLS_DIR}/apksigner" || ! -x "${BUILD_TOOLS_DIR}/aapt" ]]; 
   exit 1
 fi
 
-quest_apk="${1:-build/hidefall-quest-debug.apk}"
-mobile_apk="${2:-build/hidefall-mobile-debug.apk}"
+quest_apk="${1:-build/hidefall-quest.apk}"
+mobile_apk="${2:-build/hidefall-mobile.apk}"
 
 test -f "${quest_apk}"
 test -f "${mobile_apk}"
@@ -43,16 +43,28 @@ if [[ -n "${EXPECTED_CERT_SHA256}" && "${quest_cert_sha,,}" != "${EXPECTED_CERT_
   exit 1
 fi
 
-quest_manifest="$("${BUILD_TOOLS_DIR}/aapt" dump xmltree "${quest_apk}" AndroidManifest.xml)"
+quest_manifest_file="$(mktemp)"
+mobile_manifest_file="$(mktemp)"
+trap 'rm -f "${quest_manifest_file}" "${mobile_manifest_file}"' EXIT
+"${BUILD_TOOLS_DIR}/aapt" dump badging "${quest_apk}" | grep -q "targetSdkVersion:'35'" || {
+  echo "Quest APK targetSdkVersion must be 35 for current Quest/OpenXR Vulkan compatibility" >&2
+  exit 1
+}
+"${BUILD_TOOLS_DIR}/aapt" dump xmltree "${quest_apk}" AndroidManifest.xml > "${quest_manifest_file}"
+quest_manifest="$(cat "${quest_manifest_file}")"
 required_quest_entries=(
   "android:versionName.*\"${EXPECTED_VERSION_NAME}\""
   'org.khronos.openxr.permission.OPENXR'
   'org.khronos.openxr.permission.OPENXR_SYSTEM'
   'android.hardware.vr.headtracking'
+  'com.oculus.permission.HAND_TRACKING'
+  'oculus.software.handtracking'
+  'com.oculus.handtracking.version'
+  'com.oculus.handtracking.frequency'
+  'org.godotengine.plugin.v2.GodotOpenXR'
   'com.oculus.intent.category.VR'
   'org.khronos.openxr.intent.category.IMMERSIVE_HMD'
   'com.oculus.supportedDevices'
-  'org.godotengine.plugin.v2.GodotOpenXR'
 )
 
 for pattern in "${required_quest_entries[@]}"; do
@@ -61,11 +73,12 @@ for pattern in "${required_quest_entries[@]}"; do
     exit 1
   fi
 done
+python "${ROOT}/tools/verify_quest_launcher_filter.py" "${quest_manifest_file}"
 
 quest_contents="$(unzip -l "${quest_apk}")"
 required_quest_files=(
-  'lib/arm64-v8a/libgodotopenxrvendors.so'
   'lib/arm64-v8a/libopenxr_loader.so'
+  'lib/arm64-v8a/libgodotopenxrvendors.so'
   'assets/addons/godotopenxrvendors/plugin.gdextension'
   'openxr_action_map'
 )
@@ -76,9 +89,9 @@ for pattern in "${required_quest_files[@]}"; do
     exit 1
   fi
 done
-
-mobile_manifest="$("${BUILD_TOOLS_DIR}/aapt" dump xmltree "${mobile_apk}" AndroidManifest.xml)"
-if grep -Eq 'com.oculus.intent.category.VR|org.khronos.openxr.intent.category.IMMERSIVE_HMD|org.godotengine.plugin.v2.GodotOpenXR|android.hardware.vr.headtracking|org.khronos.openxr.permission.OPENXR' <<< "${mobile_manifest}"; then
+"${BUILD_TOOLS_DIR}/aapt" dump xmltree "${mobile_apk}" AndroidManifest.xml > "${mobile_manifest_file}"
+mobile_manifest="$(cat "${mobile_manifest_file}")"
+if grep -Eq 'com.oculus.intent.category.VR|org.khronos.openxr.intent.category.IMMERSIVE_HMD|org.godotengine.plugin.v2.GodotOpenXR|android.hardware.vr.headtracking|oculus.software.handtracking|com.oculus.permission.HAND_TRACKING|org.khronos.openxr.permission.OPENXR' <<< "${mobile_manifest}"; then
   echo "Mobile APK unexpectedly contains XR manifest entries" >&2
   exit 1
 fi
@@ -90,6 +103,10 @@ fi
 mobile_contents="$(unzip -l "${mobile_apk}")"
 if grep -Eq 'libgodotopenxrvendors|libopenxr_loader|assets/addons/godotopenxrvendors' <<< "${mobile_contents}"; then
   echo "Mobile APK unexpectedly contains Quest OpenXR vendor binaries" >&2
+  exit 1
+fi
+if grep -Eiq 'vulkan_validation_layers|VkLayer|libVkLayer' <<< "${quest_contents}"; then
+  echo "Quest APK unexpectedly contains Vulkan validation layers" >&2
   exit 1
 fi
 

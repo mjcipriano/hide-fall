@@ -295,3 +295,220 @@ This file is the handoff point for future agents. Keep it current before and aft
 2. Test `v0.2.2` on Quest; one uninstall may be required when moving from `v0.2.1` to the first upload-key-signed build, but later builds should install over it.
 3. Re-enable passthrough only after an ADB smoke test proves the opaque immersive VR startup path works on Quest.
 4. Add deeper reconnect/network interruption tests and production/store AAB signing if needed.
+
+## 2026-06-30
+
+- User connected Quest 3 via Windows ADB from WSL; device was visible as `2G97C5ZH6J00SH device product:eureka model:Quest_3`.
+- Reproduced the headset failure with `tools/quest_smoke_test.sh`:
+  - install over the existing package succeeds when using the persistent upload signing key,
+  - Horizon launches the app as immersive VR (`ActivityTaskManager` reports the Hidefall activity as immersive),
+  - the app process starts, but then dies before the Godot scene runs.
+- Pulled focused app logs from `build/quest-smoke/quest-smoke-logcat.txt`:
+  - `GodotPluginRegistry` initializes `GodotOpenXR`,
+  - `GodotOpenXR` loads `libgodotopenxrvendors.so`,
+  - OpenXR instance creation succeeds on the Oculus runtime (`OpenXR 1.1.54`, runtime `Oculus 204.201.0`),
+  - crash root cause is Vulkan device creation through OpenXR:
+    - `invalid vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkCreateDevice") call`,
+    - `OpenXR: Failed to create Vulkan device [ XR_ERROR_VALIDATION_FAILURE ]`,
+    - `ERROR: Unable to create DisplayServer, all display drivers failed`,
+    - native `SIGSEGV` follows in `VkThread`.
+- Fixed the earlier packaging regression:
+  - Quest export now packages the Godot OpenXR Vendors addon and enables the Meta plugin,
+  - `tools/prepare_android_xr_template.py` explicitly adds the local `godotopenxr-meta` AAR dependency for custom Gradle exports,
+  - artifact verifier now requires `lib/arm64-v8a/libgodotopenxrvendors.so`, `assets/addons/godotopenxrvendors/plugin.gdextension`, and `org.godotengine.plugin.v2.GodotOpenXR`.
+- Hardened Quest manifest generation:
+  - main manifest now includes OpenXR runtime broker queries and `org.khronos.openxr.permission.OPENXR` / `OPENXR_SYSTEM`, so release builds do not rely on the debug manifest overlay,
+  - Gradle manifest post-processing also checks `src/release/AndroidManifest.xml`,
+  - Quest launcher filter still requires `LAUNCHER`, `com.oculus.intent.category.VR`, and `org.khronos.openxr.intent.category.IMMERSIVE_HMD` with no `HOME`.
+- Switched APK production to release exports to avoid debug Vulkan validation layers:
+  - `make build-apks` now writes `build/hidefall-quest.apk` and `build/hidefall-mobile.apk` using `--export-release`,
+  - release workflow attaches versioned assets `hidefall-quest-<version>.apk` and `hidefall-mobile-<version>.apk`,
+  - verifier rejects Quest APKs containing Vulkan validation layer artifacts,
+  - CI artifact is now `hidefall-release-apks`.
+- Improved `tools/quest_smoke_test.sh`:
+  - default APK is `build/hidefall-quest.apk`,
+  - clears logcat after install, not before install,
+  - captures the full post-launch logcat instead of a 2,000-line tail.
+- Local verification completed:
+  - `conda run -n hidefall make test` passes after the release/export changes.
+- Local verification blocked:
+  - non-escalated `conda run -n hidefall make build-apks` fails in this sandbox because Gradle must open a daemon socket and gets `java.net.SocketException: Operation not permitted`,
+  - an escalated ADB/logcat command was rejected by the environment usage limit at 2026-06-30 before release APK build/install/smoke could be rerun.
+
+## Next
+
+1. Get explicit user approval to resume escalated commands after the usage-limit rejection.
+2. Run an upload-signed release build outside the sandbox:
+   `set -a; source /tmp/hidefall-upload-signing.env; set +a; conda run -n hidefall make build-apks`.
+3. Restore any signing secrets that `tools/configure_godot_android.py` writes into `game/export_presets.cfg` before committing.
+4. Run `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 conda run -n hidefall make verify-apks`.
+5. Install and smoke-test `build/hidefall-quest.apk` on the connected Quest via Windows ADB.
+6. If release smoke passes, commit, push, watch GitHub Actions, tag the next version, confirm the release workflow attaches versioned APK assets, download them, verify checksums/APK contents, and smoke-test the released Quest APK.
+
+## 2026-06-30 Retry
+
+- User approved retry after reconnecting the Quest.
+- Built upload-signed release APKs successfully outside the sandbox:
+  - `build/hidefall-quest.apk` (80 MB),
+  - `build/hidefall-mobile.apk` (26 MB).
+- Restored `game/export_presets.cfg` signing fields back to non-secret placeholder values after the signed build.
+- Verified release APK artifacts locally:
+  - `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 conda run -n hidefall make verify-apks` passes,
+  - Quest/mobile APKs are signed by the same persistent upload certificate,
+  - Quest APK contains `lib/arm64-v8a/libgodotopenxrvendors.so`, `lib/arm64-v8a/libopenxr_loader.so`, `assets/addons/godotopenxrvendors/plugin.gdextension`, and the OpenXR action map,
+  - Quest APK verifier rejected no Vulkan validation layer artifacts,
+  - mobile APK remains non-XR and does not include Quest OpenXR vendor binaries.
+- Could not rerun Quest smoke test because Windows ADB did not see any connected device:
+  - `powershell.exe ... adb.exe devices -l` returned only `List of devices attached`,
+  - direct `/mnt/c/Users/mcipr/AppData/Local/Android/Sdk/platform-tools/adb.exe devices -l` also returned an empty list,
+  - after `adb kill-server` / `adb start-server`, the device list stayed empty,
+  - a 24-poll direct ADB loop over roughly two minutes stayed empty.
+
+## Next
+
+1. Make Windows ADB show the Quest in `adb devices -l`; if it appears as `unauthorized`, put on the headset and accept the USB debugging prompt.
+2. Run `ADB=/mnt/c/Users/mcipr/AppData/Local/Android/Sdk/platform-tools/adb.exe HIDEFALL_QUEST_SMOKE_SECONDS=12 tools/quest_smoke_test.sh build/hidefall-quest.apk`.
+3. If smoke passes, commit the release-path changes, push, watch GitHub Actions, tag the next version, and verify the GitHub release artifacts.
+
+## 2026-06-30 Quest Reconnect Attempt
+
+- Retried after the headset was disconnected/reconnected.
+- Windows ADB still reported zero devices from both Android SDK ADB and Oculus Developer Hub ADB:
+  - `/mnt/c/Users/mcipr/AppData/Local/Android/Sdk/platform-tools/adb.exe devices -l`,
+  - `/mnt/c/Program Files/Oculus Developer Hub/resources/bin/adb.exe devices -l`.
+- Windows PnP/WMI diagnostics showed Oculus/Meta Link virtual devices, but no Quest/Android USB debug interface:
+  - no `VID_2833` Meta/Quest device,
+  - no `VID_18D1` Android debug device,
+  - no ADB/Android/Quest PnP device row.
+- `tools/quest_smoke_test.sh build/hidefall-quest.apk` correctly refused to run because it found zero authorized Android devices.
+- User reported the headset battery is low and will charge it before the next ADB retry.
+
+## Next
+
+1. After the headset charges, reconnect it directly over USB, wake it, and keep it out of Oculus/Meta Link if Link prevents the Android USB debug interface from enumerating.
+2. Confirm Windows ADB shows one Quest row with `adb devices -l`; if it shows `unauthorized`, accept the USB debugging prompt in-headset.
+3. Run `ADB=/mnt/c/Users/mcipr/AppData/Local/Android/Sdk/platform-tools/adb.exe HIDEFALL_QUEST_SMOKE_SECONDS=12 tools/quest_smoke_test.sh build/hidefall-quest.apk`.
+4. If smoke passes, commit, push, watch GitHub Actions, tag `v0.2.3`, verify release APK assets and checksums, then smoke-test the downloaded release Quest APK.
+
+## 2026-06-30 ADB Authorization Attempt
+
+- Quest is now visible to Windows ADB as serial `2G97C5ZH6J00SH`, but remains `unauthorized`.
+- Restarted Windows ADB and forced transport reconnects; state stayed `unauthorized`.
+- Backed up/regenerated Windows ADB host keys under `%USERPROFILE%\.android`:
+  - existing keys moved to timestamped `.bak-20260630-134917` files,
+  - new `adbkey` / `adbkey.pub` generated at 2026-06-30 13:49.
+- After the fresh host key, ADB still reported:
+  - `2G97C5ZH6J00SH unauthorized transport_id:1`.
+- Launched Oculus Developer Hub from `C:\Program Files\Oculus Developer Hub\Oculus Developer Hub.exe`; raw ADB state remained unauthorized.
+- User does not see the authorization prompt in-headset yet.
+
+## Next
+
+1. Put on the headset in standalone Quest home, not inside Quest Link/PCVR.
+2. Unlock/wake the headset, then unplug/replug USB while wearing it and accept the `Allow USB debugging?` prompt. Check `Always allow from this computer` if offered.
+3. If the prompt still does not appear, open Oculus Developer Hub on Windows and check the device panel for setup/authorization prompts, or use the headset settings path for Developer options to revoke/reset USB debugging authorizations.
+4. Once `adb devices -l` shows `2G97C5ZH6J00SH device`, run `ADB=/mnt/c/Users/mcipr/AppData/Local/Android/Sdk/platform-tools/adb.exe HIDEFALL_QUEST_SMOKE_SECONDS=12 tools/quest_smoke_test.sh build/hidefall-quest.apk`.
+
+## 2026-06-30 Authorization Retry
+
+- Retried after user attempted another headset-side change.
+- Android SDK ADB still reports `2G97C5ZH6J00SH unauthorized`.
+- Oculus Developer Hub is running on Windows.
+- Forced reconnect with Oculus Developer Hub's bundled ADB; transport id changed, but state remained `unauthorized`.
+- Smoke test is still blocked because ADB install/logcat commands cannot run without an authorized transport.
+
+## Next
+
+1. In Oculus Developer Hub on Windows, inspect the device connection panel for the Quest and complete any authorization/setup prompt it shows.
+2. In the headset, stay in standalone Quest Home, not Link, and look for the `Allow USB debugging?` dialog after unplug/replug.
+3. If still missing, use the headset's developer settings to revoke/reset USB debugging authorizations, then reconnect and accept the new prompt.
+4. Re-run `adb devices -l`; continue only once the row says `device` instead of `unauthorized`.
+
+## 2026-06-30 Engine Compatibility / Quest Runtime Work
+
+- Quest ADB authorization was resolved; Windows ADB can install and launch to serial `2G97C5ZH6J00SH`.
+- Confirmed install-over works with the persistent upload signing key:
+  - `tools/quest_smoke_test.sh` installs with `adb install -r -d`,
+  - installs over prior `com.mjcipriano.hidefall.quest` builds succeeded repeatedly without uninstalling.
+- Godot `4.7-stable` is not viable on this Quest runtime:
+  - APK launches as immersive after manifest fixes,
+  - native startup fails before GDScript with OpenXR/Vulkan device creation errors:
+    `OpenXR: Failed to create Vulkan device [ XR_ERROR_VALIDATION_FAILURE ]`,
+    `Couldn't create a Vulkan device through the VulkanHooks singleton`,
+    `Unable to create DisplayServer`,
+    followed by a native `SIGSEGV`.
+- Switched tooling to official `godotengine/godot-builds` downloads and made Android source template extraction version-aware.
+- Tested Godot `4.6.3-stable`:
+  - official editor/templates installed,
+  - signed Quest/mobile APKs built,
+  - `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 make verify-apks` passed,
+  - Quest install-over and immersive launch succeeded,
+  - app remained running and Horizon reported it as the foreground immersive app,
+  - runtime log repeatedly emitted Godot render errors:
+    `Pre-raster shader (vertex shader) is not provided for pipeline creation`,
+    `Condition "!variants_enabled[p_variant]" is true`,
+    `Condition "shader.is_null()" is true`,
+    `tonemapper_subpass`.
+- Fixed one game-code issue found during 4.6.3 smoke:
+  - compacted host join QR payload to fit the version 5-L QR capacity,
+  - added a test assertion that `get_join_payload_text()` is at most 106 bytes.
+- Tightened `tools/quest_smoke_test.sh`:
+  - no longer fails on generic Quest runtime warnings or unrelated `AndroidRuntime: VM exiting with result code 0`,
+  - does fail on app death, native crash markers, OpenXR/Vulkan startup failures, and unignored Godot errors.
+- Tested Godot `4.5.2-stable`:
+  - signed APK built after making the patcher handle root-level Android manifests,
+  - verifier failed because `lib/arm64-v8a/libopenxr_loader.so` was missing,
+  - headset smoke showed the current OpenXR Vendors addon requires Godot 4.6+ and OpenXR loader was missing:
+    `GDExtension only compatible with Godot version 4.6.0 or later`,
+    `OpenXR loader not found`.
+  - 4.5.2 is therefore not viable with the current addon.
+- Tested Godot `4.6.2-stable`:
+  - official editor/templates installed,
+  - signed Quest/mobile APKs built,
+  - `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 make verify-apks` passed,
+  - headset install-over and immersive launch succeeded,
+  - runtime had the same repeated Godot render errors as 4.6.3.
+- Began testing whether switching from Forward Mobile to Forward+ avoids the headset render errors:
+  - changed `game/project.godot` to `renderer/rendering_method="forward_plus"`,
+  - first build reused stale Godot cache and still logged `renderer: mobile (ProjectSettings)`,
+  - stopped the app and ran `make clean-godot`,
+  - the next signed `make build-quest-apk` command was blocked by the platform usage limit before it could run.
+
+## Next
+
+1. After the platform usage limit resets, run:
+   `set -a; source /tmp/hidefall-upload-signing.env; set +a; source "$HOME/miniconda3/bin/activate" hidefall && make build-quest-apk`
+2. Immediately restore signing placeholders in `game/export_presets.cfg`.
+3. Run Quest smoke:
+   `ADB=/mnt/c/Users/mcipr/AppData/Local/Android/Sdk/platform-tools/adb.exe HIDEFALL_QUEST_SMOKE_SECONDS=12 tools/quest_smoke_test.sh build/hidefall-quest.apk`
+4. Inspect `build/quest-smoke/quest-smoke-logcat.txt`:
+   - if it now logs `renderer: forward_plus` and Godot render errors disappear, keep Forward+, build mobile, verify APKs, run full tests, commit/push/tag/release,
+   - if it still logs render errors, revert to `mobile` renderer and isolate scene features next, starting with temporarily disabling `Label3D`, `Sprite3D`, transparent materials, and `WorldEnvironment` setup in `game/scripts/quest/seeker/host_prototype.gd`.
+5. Do not ship until a signed APK passes:
+   - `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 make verify-apks`,
+   - `make test`,
+   - Quest smoke over ADB with no app crash and no unignored Godot errors.
+
+## 2026-06-30 Compatibility Renderer Pass
+
+- Searched for upstream/primary guidance and found Godot's Android XR deployment docs recommend the Compatibility/OpenGL renderer path for Android XR over the experimental/rough Vulkan Mobile renderer path.
+- Set `game/project.godot` to `renderer/rendering_method="gl_compatibility"` and added a validator guard so future changes do not accidentally move the project back to the failing Vulkan renderer path.
+- Cleaned generated Godot state and rebuilt a signed Quest APK with Godot `4.6.2-stable`.
+- Restored `game/export_presets.cfg` signing fields to placeholders after signing.
+- Quest smoke passed over Windows ADB:
+  - command: `ADB=/mnt/c/Users/mcipr/AppData/Local/Android/Sdk/platform-tools/adb.exe HIDEFALL_QUEST_SMOKE_SECONDS=12 tools/quest_smoke_test.sh build/hidefall-quest.apk`,
+  - install-over succeeded,
+  - process stayed running,
+  - no unignored Godot errors were found in `build/quest-smoke/quest-smoke-logcat.txt`.
+- Rebuilt the signed mobile APK with the same upload signing key and restored signing placeholders again.
+- `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 make verify-apks` passed for both APKs.
+- The first `make test` attempt hung during local desktop OpenXR probing. Updated the test target to use `--xr-mode off`; Quest XR startup remains covered by the ADB smoke test.
+- `make test` now passes with Godot `4.6.2-stable`.
+
+## Next
+
+1. Run final `git status`, confirm no generated files or secrets are staged.
+2. Commit and push the fixes to `master`.
+3. Watch GitHub Actions.
+4. Tag/release `v0.2.3` if needed, then verify release assets include versioned Quest/mobile APKs and checksums.
+5. Download the release APKs, run `tools/verify_android_artifacts.sh` on them, and smoke-test the released Quest APK over ADB.

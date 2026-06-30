@@ -13,8 +13,8 @@ make verify-apks
 
 Outputs:
 
-- `build/hidefall-quest-debug.apk`
-- `build/hidefall-mobile-debug.apk`
+- `build/hidefall-quest.apk`
+- `build/hidefall-mobile.apk`
 
 Local APKs are signed with a generated local debug keystore at `tools/android-keystore/debug.keystore` unless the Hidefall upload-key environment variables are present. This file is ignored by git and recreated by `make create-debug-keystore`.
 
@@ -30,17 +30,17 @@ The public upload certificate SHA-256 fingerprint is tracked in `tools/android-s
 
 Because `v0.2.0` and `v0.2.1` were signed by ephemeral CI debug keys, moving from either of those builds to the first upload-key-signed build may still require one uninstall. Builds after that should install over the existing package as long as the package name and upload key remain unchanged.
 
-GitHub Actions runs tests and builds both debug APKs, then uploads them as the `hidefall-debug-apks` artifact.
+GitHub Actions runs tests and builds both release APKs, then uploads them as the `hidefall-release-apks` artifact.
 
 The Quest preset intentionally uses the Android Gradle build template. `make build-quest-apk` prepares that generated template under ignored `game/android/` and injects the Godot OpenXR Vendors Meta AAR dependency. `make verify-apks` verifies signatures, Quest/OpenXR immersive manifest categories, packaged OpenXR vendor files, and confirms the mobile APK has no XR manifest or vendor binary entries.
 
 Useful low-level local post-build checks:
 
 ```bash
-tools/android-sdk/build-tools/36.1.0/apksigner verify --verbose build/hidefall-quest-debug.apk
-tools/android-sdk/build-tools/36.1.0/aapt dump xmltree build/hidefall-quest-debug.apk AndroidManifest.xml | rg "com.oculus.intent.category.VR|IMMERSIVE_HMD|GodotOpenXR|vr.headtracking|OPENXR"
-tools/android-sdk/build-tools/36.1.0/apksigner verify --verbose build/hidefall-mobile-debug.apk
-tools/android-sdk/build-tools/36.1.0/aapt dump xmltree build/hidefall-mobile-debug.apk AndroidManifest.xml | rg "com.oculus.intent.category.VR|IMMERSIVE_HMD|GodotOpenXR|vr.headtracking|OPENXR" || true
+tools/android-sdk/build-tools/36.1.0/apksigner verify --verbose build/hidefall-quest.apk
+tools/android-sdk/build-tools/36.1.0/aapt dump xmltree build/hidefall-quest.apk AndroidManifest.xml | rg "com.oculus.intent.category.VR|IMMERSIVE_HMD|GodotOpenXR|vr.headtracking|OPENXR"
+tools/android-sdk/build-tools/36.1.0/apksigner verify --verbose build/hidefall-mobile.apk
+tools/android-sdk/build-tools/36.1.0/aapt dump xmltree build/hidefall-mobile.apk AndroidManifest.xml | rg "com.oculus.intent.category.VR|IMMERSIVE_HMD|GodotOpenXR|vr.headtracking|OPENXR" || true
 ```
 
 The Quest manifest query should find immersive/OpenXR entries. The mobile manifest query should return no matches.
@@ -66,8 +66,8 @@ git push origin v0.2.1
 
 The `Release` workflow builds the APKs from the tag, verifies signatures, verifies the upload certificate, writes `SHA256SUMS`, creates a GitHub Release titled `Hidefall X.Y.Z`, and attaches:
 
-- `hidefall-quest-debug.apk`
-- `hidefall-mobile-debug.apk`
+- `hidefall-quest-<version>.apk`
+- `hidefall-mobile-<version>.apk`
 - `SHA256SUMS`
 
 The workflow can also be started manually from GitHub Actions with the same tag value.

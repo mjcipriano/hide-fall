@@ -398,9 +398,7 @@ func get_danger_for_player(player_id: String) -> String:
 
 func get_join_payload(host_ip: String, port: int) -> Dictionary:
 	return {
-		"game": "hidefall",
-		"version": NetworkMessageValidatorScript.PROTOCOL_VERSION,
-		"host_ip": host_ip,
+		"url": "ws://%s:%d" % [host_ip, port],
 		"port": port,
 		"room_id": room_id,
 		"token": room_token

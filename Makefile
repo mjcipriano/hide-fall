@@ -1,7 +1,8 @@
-GODOT_VERSION := 4.7-stable
+GODOT_VERSION := 4.6.2-stable
+TEMPLATE_VERSION := $(subst -stable,.stable,$(GODOT_VERSION))
 GODOT_BIN := tools/godot/Godot_v$(GODOT_VERSION)_linux.x86_64
 GODOT_ZIP := /tmp/godot-$(GODOT_VERSION)-linux.zip
-GODOT_URL := https://github.com/godotengine/godot/releases/download/$(GODOT_VERSION)/Godot_v$(GODOT_VERSION)_linux.x86_64.zip
+GODOT_URL := https://github.com/godotengine/godot-builds/releases/download/$(GODOT_VERSION)/Godot_v$(GODOT_VERSION)_linux.x86_64.zip
 ANDROID_SDK_ROOT ?= $(abspath tools/android-sdk)
 ANDROID_HOME ?= $(ANDROID_SDK_ROOT)
 ANDROID_BUILD_TOOLS_VERSION ?= 36.1.0
@@ -21,7 +22,7 @@ install-godot:
 	chmod +x $(GODOT_BIN)
 
 install-export-templates:
-	env $(GODOT_ENV) tools/install_godot_export_templates.sh
+	env $(GODOT_ENV) GODOT_VERSION=$(GODOT_VERSION) TEMPLATE_VERSION=$(TEMPLATE_VERSION) tools/install_godot_export_templates.sh
 
 install-android-sdk:
 	tools/install_android_sdk.sh
@@ -36,7 +37,7 @@ configure-android-export: ensure-android-sdk create-debug-keystore
 	env $(GODOT_ENV) python tools/configure_godot_android.py
 
 prepare-android-xr-template:
-	env $(GODOT_ENV) python tools/prepare_android_xr_template.py
+	env $(GODOT_ENV) TEMPLATE_VERSION=$(TEMPLATE_VERSION) python tools/prepare_android_xr_template.py
 
 require-release-signing:
 	tools/require_release_signing.sh
@@ -46,9 +47,10 @@ godot-version:
 
 validate:
 	python tools/validate_content.py
+	python tools/validate_android_config.py
 
 test: validate
-	env $(GODOT_ENV) $(GODOT_BIN) --headless --path game --script res://tests/test_runner.gd
+	env $(GODOT_ENV) $(GODOT_BIN) --headless --xr-mode off --path game --script res://tests/test_runner.gd
 
 run:
 	env $(GODOT_ENV) $(GODOT_BIN) --path game
@@ -57,17 +59,17 @@ build-apks: build-quest-apk build-mobile-apk
 
 build-quest-apk: configure-android-export prepare-android-xr-template
 	mkdir -p build
-	env $(GODOT_ENV) HIDEFALL_DISABLE_NETWORK=1 $(GODOT_BIN) --headless --path game --export-debug "Quest Debug APK" ../build/hidefall-quest-debug.apk
+	env $(GODOT_ENV) HIDEFALL_DISABLE_NETWORK=1 $(GODOT_BIN) --headless --path game --export-release "Quest Release APK" ../build/hidefall-quest.apk
 
 build-mobile-apk: configure-android-export
 	mkdir -p build
-	env $(GODOT_ENV) HIDEFALL_DISABLE_NETWORK=1 $(GODOT_BIN) --headless --path game --export-debug "Mobile Debug APK" ../build/hidefall-mobile-debug.apk
+	env $(GODOT_ENV) HIDEFALL_DISABLE_NETWORK=1 $(GODOT_BIN) --headless --path game --export-release "Mobile Release APK" ../build/hidefall-mobile.apk
 
 verify-apks:
 	tools/verify_android_artifacts.sh
 
 smoke-quest-apk:
-	tools/quest_smoke_test.sh build/hidefall-quest-debug.apk
+	tools/quest_smoke_test.sh build/hidefall-quest.apk
 
 clean-godot:
 	rm -rf game/.godot

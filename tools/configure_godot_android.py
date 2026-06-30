@@ -86,6 +86,9 @@ def patch_export_presets(signing: dict[str, str]) -> None:
         "keystore/debug": q(relative_to_game(signing["keystore"])),
         "keystore/debug_user": q(signing["alias"]),
         "keystore/debug_password": q(signing["store_password"]),
+        "keystore/release": q(relative_to_game(signing["keystore"])),
+        "keystore/release_user": q(signing["alias"]),
+        "keystore/release_password": q(signing["key_password"]),
     }
     patched: list[str] = []
     for line in lines:

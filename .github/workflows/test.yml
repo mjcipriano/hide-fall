@@ -54,8 +54,8 @@ jobs:
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: hidefall-debug-apks
+          name: hidefall-release-apks
           path: |
-            build/hidefall-quest-debug.apk
-            build/hidefall-mobile-debug.apk
+            build/hidefall-quest.apk
+            build/hidefall-mobile.apk
           if-no-files-found: error

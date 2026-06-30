@@ -85,7 +85,9 @@ jobs:
         shell: bash -el {0}
         run: |
           cd build
-          sha256sum hidefall-quest-debug.apk hidefall-mobile-debug.apk > SHA256SUMS
+          cp hidefall-quest.apk "hidefall-quest-${{ steps.version.outputs.version }}.apk"
+          cp hidefall-mobile.apk "hidefall-mobile-${{ steps.version.outputs.version }}.apk"
+          sha256sum "hidefall-quest-${{ steps.version.outputs.version }}.apk" "hidefall-mobile-${{ steps.version.outputs.version }}.apk" > SHA256SUMS
           cat > "RELEASE_NOTES.md" <<EOF
           # Hidefall ${{ steps.version.outputs.version }}
 
@@ -93,8 +95,8 @@ jobs:
 
           ## Assets
 
-          - `hidefall-quest-debug.apk`: Quest host/seeker build.
-          - `hidefall-mobile-debug.apk`: Android hider client build.
+          - `hidefall-quest-${{ steps.version.outputs.version }}.apk`: Quest host/seeker release build.
+          - `hidefall-mobile-${{ steps.version.outputs.version }}.apk`: Android hider client release build.
           - `SHA256SUMS`: SHA-256 checksums for both APKs.
 
           These APKs use the persistent Hidefall upload signing key from GitHub Secrets so upgrades install over earlier builds signed by the same key.
@@ -106,8 +108,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ steps.version.outputs.tag }}" \
-            build/hidefall-quest-debug.apk \
-            build/hidefall-mobile-debug.apk \
+            build/hidefall-quest-${{ steps.version.outputs.version }}.apk \
+            build/hidefall-mobile-${{ steps.version.outputs.version }}.apk \
             build/SHA256SUMS \
             --repo "${GITHUB_REPOSITORY}" \
             --title "Hidefall ${{ steps.version.outputs.version }}" \
