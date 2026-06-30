@@ -260,12 +260,38 @@ This file is the handoff point for future agents. Keep it current before and aft
   - `conda run -n hidefall make build-apks` passes outside the sandbox,
   - `conda run -n hidefall make verify-apks` passes,
   - `source /tmp/hidefall-upload-signing.env && make require-release-signing` passes for the temporary local copy of the same signing env that was written to GitHub Secrets.
+- Pushed commit `c6c2234` to `master`.
+- GitHub Actions Test And Build run `28414301811` passed for `master` on commit `c6c2234`:
+  - `test` passed,
+  - `android-apks` passed,
+  - `Verify APK artifacts` passed with the upload signing certificate secret.
+- Tagged and pushed `v0.2.2` at commit `c6c2234`.
+- Release workflow run `28414437594` passed:
+  - release signing secret gate passed,
+  - tests passed,
+  - both APKs built,
+  - `Verify APK artifacts` passed,
+  - checksums and release notes were written,
+  - GitHub Release creation passed.
+- Tag-triggered Test And Build run `28414437569` passed:
+  - `test` passed,
+  - `android-apks` passed,
+  - `Verify APK artifacts` passed.
+- Confirmed GitHub Release `v0.2.2` exists:
+  - URL: https://github.com/mjcipriano/hide-fall/releases/tag/v0.2.2
+  - title: `Hidefall 0.2.2`
+  - published: 2026-06-30T01:43:28Z
+  - attached assets: `hidefall-quest-debug.apk`, `hidefall-mobile-debug.apk`, `SHA256SUMS`.
+- Downloaded release assets to `/tmp/hidefall-release-v0.2.2` and verified:
+  - `sha256sum -c SHA256SUMS` passes,
+  - `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 tools/verify_android_artifacts.sh /tmp/hidefall-release-v0.2.2/hidefall-quest-debug.apk /tmp/hidefall-release-v0.2.2/hidefall-mobile-debug.apk` passes,
+  - downloaded Quest/mobile APKs are signed with the persistent upload certificate,
+  - downloaded Quest APK still contains immersive OpenXR/Quest manifest entries plus packaged Meta OpenXR vendor native files,
+  - downloaded mobile APK remains non-XR.
 
 ## Next
 
-1. Commit, push, and release `v0.2.2` with persistent upload-key signing.
-2. Confirm CI verifies `HIDEFALL_ANDROID_CERT_SHA256` on both APKs.
-3. Download `v0.2.2` release assets and verify checksums/APK artifact contents.
-4. Run `make smoke-quest-apk` with a connected Quest before headset testing when hardware is available.
-5. Test `v0.2.2` on Quest; one uninstall may be required when moving from `v0.2.1` to the first upload-key-signed build, but later builds should install over it.
-6. Re-enable passthrough only after an ADB smoke test proves the opaque immersive VR startup path works on Quest.
+1. Run `make smoke-quest-apk` with a connected Quest before headset testing when hardware is available.
+2. Test `v0.2.2` on Quest; one uninstall may be required when moving from `v0.2.1` to the first upload-key-signed build, but later builds should install over it.
+3. Re-enable passthrough only after an ADB smoke test proves the opaque immersive VR startup path works on Quest.
+4. Add deeper reconnect/network interruption tests and production/store AAB signing if needed.
