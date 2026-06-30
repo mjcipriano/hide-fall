@@ -544,10 +544,35 @@ This file is the handoff point for future agents. Keep it current before and aft
   - process stayed running,
   - log showed `Hidefall visible gameplay ready: phase=object_rain objects=78 object_nodes=78 xr=OpenXR immersive passthrough`,
   - manifest showed `versionCode=6`, `versionName=0.2.4`, and `com.oculus.feature.PASSTHROUGH`.
+- Committed and pushed `1058f57 Make Quest launch into playable MR round`.
+- GitHub Actions `Test And Build` run `28483160118` passed:
+  - Godot tests passed,
+  - Android APK build passed,
+  - APK artifact verification passed,
+  - CI uploaded branch APK artifacts.
+- Tagged and pushed `v0.2.4`.
+- GitHub Actions `Release` run `28483331168` passed:
+  - signing secrets were present,
+  - tests passed,
+  - release APKs built,
+  - release APK artifact verification passed,
+  - `Hidefall 0.2.4` was published.
+- Verified GitHub release assets:
+  - `hidefall-quest-0.2.4.apk`,
+  - `hidefall-mobile-0.2.4.apk`,
+  - `SHA256SUMS`.
+- Downloaded release assets to `/tmp/hidefall-release-v0.2.4.o1gpXw`.
+- `sha256sum -c SHA256SUMS` passed for both APKs.
+- `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 tools/verify_android_artifacts.sh /tmp/hidefall-release-v0.2.4.o1gpXw/hidefall-quest-0.2.4.apk /tmp/hidefall-release-v0.2.4.o1gpXw/hidefall-mobile-0.2.4.apk` passed.
+- Release Quest APK smoke passed over Windows ADB:
+  - command: `ADB=/mnt/c/Users/mcipr/AppData/Local/Android/Sdk/platform-tools/adb.exe HIDEFALL_QUEST_SMOKE_SECONDS=12 tools/quest_smoke_test.sh /tmp/hidefall-release-v0.2.4.o1gpXw/hidefall-quest-0.2.4.apk`,
+  - install-over succeeded,
+  - process stayed running,
+  - log showed `Hidefall visible gameplay ready: phase=object_rain objects=78 object_nodes=78 xr=OpenXR immersive passthrough`,
+  - log saved to `build/quest-smoke/quest-smoke-logcat.txt`.
 
 ## Next
 
-1. Commit and push the `0.2.4` gameplay/MR fix.
-2. Watch GitHub Actions.
-3. Tag and release `v0.2.4`.
-4. Download release assets, verify checksums/APK metadata, and smoke-test the released Quest APK over ADB.
+1. No release-blocking work is open for `v0.2.4`.
+2. If the user reports another headset issue, start from `build/quest-smoke/quest-smoke-logcat.txt`, rerun the released APK smoke test, and compare against the passing `v0.2.4` release assets.
+3. Non-blocking cleanup: update GitHub Actions setup-miniconda options to remove deprecation annotations for `auto-activate-base` and implicit `defaults` channel.
