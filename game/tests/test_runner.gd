@@ -311,14 +311,14 @@ func _test_orientation_settle() -> void:
 
 
 func _test_scoring_rules() -> void:
-	var moving := ScoreCalculator.hider_score({"alive": true, "alive_time": 10.0, "distance_moved": 12.0}, 90.0)
-	var still := ScoreCalculator.hider_score({"alive": true, "alive_time": 10.0, "distance_moved": 0.0}, 90.0)
+	var moving := ScoreCalculatorScript.hider_score({"alive": true, "alive_time": 10.0, "distance_moved": 12.0}, 90.0)
+	var still := ScoreCalculatorScript.hider_score({"alive": true, "alive_time": 10.0, "distance_moved": 0.0}, 90.0)
 	_assert(moving > still, "hiders earn more the more they move")
-	var finder := ScoreCalculator.seeker_score({"correct_shots": 2, "wrong_shots": 0, "all_hiders_found": true})
-	var misser := ScoreCalculator.seeker_score({"correct_shots": 1, "wrong_shots": 0})
+	var finder := ScoreCalculatorScript.seeker_score({"correct_shots": 2, "wrong_shots": 0, "all_hiders_found": true})
+	var misser := ScoreCalculatorScript.seeker_score({"correct_shots": 1, "wrong_shots": 0})
 	_assert(finder > misser, "seeker earns points for finding hiders")
-	var clean := ScoreCalculator.seeker_score({"correct_shots": 1, "wrong_shots": 0})
-	var sloppy := ScoreCalculator.seeker_score({"correct_shots": 1, "wrong_shots": 2})
+	var clean := ScoreCalculatorScript.seeker_score({"correct_shots": 1, "wrong_shots": 0})
+	var sloppy := ScoreCalculatorScript.seeker_score({"correct_shots": 1, "wrong_shots": 2})
 	_assert(sloppy < clean, "seeker loses points for shooting the wrong prop")
 
 
