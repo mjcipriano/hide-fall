@@ -571,8 +571,32 @@ This file is the handoff point for future agents. Keep it current before and aft
   - log showed `Hidefall visible gameplay ready: phase=object_rain objects=78 object_nodes=78 xr=OpenXR immersive passthrough`,
   - log saved to `build/quest-smoke/quest-smoke-logcat.txt`.
 
+## 2026-06-30
+
+- User reported the Quest app launched into a blank passthrough world: the sim ran (logcat `Hidefall visible gameplay ready ... objects=78`) but nothing rendered.
+- Root cause: OpenXR runs stereo multiview but `project.godot` used the `gl_compatibility` renderer with no `xr/shaders/enabled`, so the Forward Mobile tonemapper subpass shader was null every frame (`tonemapper_subpass shader.is_null()` / `!variants_enabled`).
+- Fix: set renderer to `mobile` (+ `.mobile`) and add `[xr] shaders/enabled=true`; updated `validate_android_config.py` to enforce this invariant instead of the old `gl_compatibility` pin.
+- Documented the WSL2 -> Quest wireless-adb / build / debug runbook and the render invariant in `AGENTS.md`.
+- Verified on Quest 3 hardware over wireless adb: zero tonemapper errors, app stable, props render in passthrough.
+- Released `v0.2.5` (render fix): GitHub Actions Release run succeeded and published `hidefall-quest-0.2.5.apk`, `hidefall-mobile-0.2.5.apk`, `SHA256SUMS`.
+
+## 2026-07-01
+
+- Iterated on seeker/prop feel from in-headset feedback, all covered by headless tests:
+  - Prop collision separation so objects stop interpenetrating.
+  - Gravity/settling for dropped and thrown props; grip is now press-and-hold (hold to carry, release to drop) with throw velocity.
+  - Shot laser tracer (green hit / amber decoy / red miss) and procedural 16-bit SFX (shoot, pickup, drop, hit, miss, empty) with no bundled assets.
+  - Edge grab that preserves the grab point and lets props twist/turn with the controller; distant grabs ease in to a hand-hold distance.
+  - Vertical half-heights so flat props dropped squarely on another prop stack instead of sliding off; collision separation only applies to props overlapping vertically.
+  - Dropped props topple toward their nearest stable face (short way, gravity-accelerated) and rest flat, rather than snapping back to their spawn pose.
+  - Out-of-ammo trigger pulls stop firing and play a distinct dry empty-click.
+  - Hiders earn points for distance travelled during the hunt; seeker scoring rewards finds and penalizes wrong shots.
+  - Cleaned up the XR HUD into a non-overlapping low-centered stack (phase / status / controls) with clearer prompts; debug dump is desktop-only.
+- Bumped version to `0.2.6` (code 8) and updated `README.md` controls/gameplay.
+
 ## Next
 
-1. No release-blocking work is open for `v0.2.4`.
-2. If the user reports another headset issue, start from `build/quest-smoke/quest-smoke-logcat.txt`, rerun the released APK smoke test, and compare against the passing `v0.2.4` release assets.
-3. Non-blocking cleanup: update GitHub Actions setup-miniconda options to remove deprecation annotations for `auto-activate-base` and implicit `defaults` channel.
+1. Release `v0.2.6` from the pushed tag and verify the published Quest/mobile APKs (assets + `sha256sum -c` + `tools/verify_android_artifacts.sh`), then smoke-test the released Quest APK in-headset.
+2. If the user reports another headset issue, start from `build/quest-smoke/quest-smoke-logcat.txt`, rerun the released APK smoke test, and grep logcat for `tonemapper`/`SCRIPT ERROR` first.
+3. Open feel question: movement scoring currently rewards raw distance travelled, which is opposite the classic "hide by freezing" design — revisit whether to reward stealthy movement or cap it.
+4. Non-blocking cleanup: update GitHub Actions setup-miniconda options to remove deprecation annotations for `auto-activate-base` and implicit `defaults` channel.

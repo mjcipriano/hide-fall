@@ -30,13 +30,13 @@ make run
 
 The current executable scene is a Godot prototype of the Quest host experience. On headset it launches directly into a solo bot round with visible falling props, an immersive OpenXR/MR view, a head-locked status panel, and a left-hand wrist menu. It also runs a WebSocket LAN host, shows a QR join code plus manual payload, and supports joined phone hiders. On desktop/headless it starts in a lobby with a normal camera and CanvasLayer HUD for local testing.
 
-Implemented gameplay includes lobby ready gating, room setup confirmation, object rain, blackout, seek, results/rematch, hider movement and freeze, shape/color disguise changes, bot hider behavior, pickup/drop inspection, limited seeker shots, a limited scan pulse, late-join spectators, scoring, and LAN phone client snapshots.
+Implemented gameplay includes lobby ready gating, room setup confirmation, object rain, blackout, seek, results/rematch, hider movement and freeze, shape/color disguise changes, and bot hider behavior. Props collide and stack instead of interpenetrating, fall under gravity, can be thrown, and topple to rest flat on a face when dropped. The seeker can hold-grab and twist props (distant grabs travel to the hand), fires a shot laser with hit/miss/empty sound cues, has limited shots that stop firing when depleted, and a limited scan pulse. Hiders earn points for how far they travel; the seeker scores for finds and is penalized for wrong shots. Late-join spectators and LAN phone client snapshots are supported.
 
 Controls:
 
 - `R`: start/rematch from lobby or confirm room setup.
-- Mouse click / right trigger: shoot along the seeker pointer ray.
-- `E` / right grip: pick up or drop the pointed-at prop.
+- Mouse click / right trigger: shoot along the seeker pointer ray (blocked with an empty-click when out of shots).
+- Hold `E` / right grip: grab and turn the pointed-at prop; release to drop it (with throw velocity).
 - `Q` / Quest primary face button: use a scan pulse during the seek phase.
 - `WASD`: local hider test movement.
 - `Space`: freeze local hider.
