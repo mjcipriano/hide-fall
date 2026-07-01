@@ -38,6 +38,7 @@ func _run() -> void:
 	_test_shooting_and_results()
 	_test_timeout_results()
 	_test_disconnect_and_soak()
+	_test_object_collisions()
 	await _test_host_scene_smoke()
 	await _test_mobile_scene_smoke()
 	_test_websocket_host_instantiates()
@@ -75,6 +76,8 @@ func _test_project_xr_startup_settings() -> void:
 	_assert(ProjectSettings.get_setting("xr/openxr/enabled", false), "OpenXR project startup is enabled")
 	_assert(int(ProjectSettings.get_setting("xr/openxr/environment_blend_mode", 0)) == 0, "OpenXR starts in opaque blend mode")
 	_assert(bool(ProjectSettings.get_setting("xr/openxr/extensions/meta/passthrough", false)), "Meta passthrough extension is enabled")
+	_assert(bool(ProjectSettings.get_setting("xr/shaders/enabled", false)), "XR multiview shaders are enabled so passthrough renders")
+	_assert(String(ProjectSettings.get_setting("rendering/renderer/rendering_method", "")) == "mobile", "Forward Mobile renderer is selected for OpenXR")
 
 
 func _test_qr_code_generation() -> void:
@@ -211,6 +214,34 @@ func _test_disconnect_and_soak() -> void:
 	_advance_for(bot_sim, 10.2)
 	var bot_object_id: String = bot_sim.players[bot_sim.players.keys()[0]]["object_id"]
 	_assert(bot_sim.objects[bot_object_id]["move_input"].length() >= 0.0 and bot_sim.objects[bot_object_id].has("bot_decision_time"), "bot hider receives autonomous decisions")
+
+
+func _test_object_collisions() -> void:
+	var sim = _new_sim(4242)
+	sim.add_hider("Solo", false)
+	_assert(sim.start_round(), "collision round starts")
+	sim.confirm_room_setup()
+	var ids := sim.get_decoy_object_ids()
+	_assert(ids.size() >= 2, "collision round spawns decoys")
+	var a: String = ids[0]
+	var b: String = ids[1]
+	var min_distance: float = float(sim.objects[a]["collision_radius"]) + float(sim.objects[b]["collision_radius"])
+
+	sim.objects[a]["held_by_seeker"] = false
+	sim.objects[b]["held_by_seeker"] = false
+	sim.objects[a]["position"] = Vector3(0.0, 0.15, 0.0)
+	sim.objects[b]["position"] = Vector3(0.02, 0.15, 0.0)
+	sim._resolve_collisions()
+	var separated: float = sim.objects[a]["position"].distance_to(sim.objects[b]["position"])
+	_assert(separated >= min_distance - 0.02, "overlapping props push apart to their combined radius")
+
+	sim.objects[a]["position"] = Vector3(0.5, 0.15, 0.0)
+	sim.objects[b]["position"] = Vector3(0.5, 0.15, 0.0)
+	sim.objects[a]["held_by_seeker"] = true
+	var held_before: Vector3 = sim.objects[a]["position"]
+	sim._resolve_collisions()
+	_assert(sim.objects[a]["position"].distance_to(held_before) < 0.001, "held prop is not displaced by collisions")
+	_assert(sim.objects[b]["position"].distance_to(sim.objects[a]["position"]) >= min_distance - 0.02, "held prop still pushes neighbors away")
 
 
 func _test_host_scene_smoke() -> void:

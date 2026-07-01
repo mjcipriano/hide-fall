@@ -205,6 +205,8 @@ func advance(delta: float) -> void:
 		PHASE_RESULTS:
 			if phase_elapsed >= float(config.get_value("round", "results_seconds", 15.0)):
 				_set_phase(PHASE_LOBBY)
+	if phase != PHASE_LOBBY and objects.size() > 1:
+		_resolve_collisions()
 
 
 func apply_hider_input(player_id: String, input: Dictionary) -> bool:
@@ -456,9 +458,11 @@ func _create_object(is_hider: bool, owner_player_id: String) -> String:
 	var radius := sqrt(rng.randf()) * play_radius
 	var y := float(config.get_value("objects", "spawn_height_meters", 2.5)) if not is_hider else 0.15
 	var position := Vector3(cos(angle) * radius, y, sin(angle) * radius)
+	var shape: String = content.pick_weighted_shape(rng)
 	objects[object_id] = {
 		"object_id": object_id,
-		"shape": content.pick_weighted_shape(rng),
+		"shape": shape,
+		"collision_radius": _collision_radius_for_shape(shape),
 		"color": content.pick_color(rng),
 		"position": position,
 		"rotation_y": rng.randf_range(0.0, TAU),
@@ -558,6 +562,7 @@ func _try_change_shape(obj: Dictionary, shape_id: String) -> void:
 	if float(obj.get("shape_cooldown", 0.0)) > 0.0:
 		return
 	obj["shape"] = shape_id
+	obj["collision_radius"] = _collision_radius_for_shape(shape_id)
 	obj["shape_cooldown"] = float(config.get_value("hiders", "shape_change_cooldown", 12.0))
 
 
@@ -627,6 +632,75 @@ func _time_remaining() -> float:
 		_:
 			return 0.0
 	return max(0.0, duration - phase_elapsed)
+
+
+func _collision_radius_for_shape(shape_id: String) -> float:
+	match shape_id:
+		"capsule":
+			return 0.15
+		"sphere", "duck", "cylinder", "can", "mug", "cone":
+			return 0.16
+		"ring":
+			return 0.17
+		"cube", "toy_block":
+			return 0.19
+		"pyramid", "star":
+			return 0.20
+	return 0.18
+
+
+# Positional sphere collision so props push each other apart instead of
+# interpenetrating. Held props and eliminated hiders shove others but are not
+# themselves displaced. A couple of relaxation passes keeps dense piles stable.
+func _resolve_collisions(iterations: int = 2) -> void:
+	var ids: Array = []
+	var pos: Dictionary = {}
+	var rad: Dictionary = {}
+	var movable: Dictionary = {}
+	for object_id in objects:
+		var obj: Dictionary = objects[object_id]
+		if obj.get("is_hider", false) and not obj.get("alive", false):
+			continue
+		ids.append(object_id)
+		pos[object_id] = obj["position"]
+		rad[object_id] = float(obj.get("collision_radius", 0.18))
+		movable[object_id] = not obj.get("held_by_seeker", false)
+	var count := ids.size()
+	if count < 2:
+		return
+	for _iteration in iterations:
+		for i in range(count):
+			var id_a: String = ids[i]
+			var pos_a: Vector3 = pos[id_a]
+			var rad_a: float = rad[id_a]
+			var move_a: bool = movable[id_a]
+			for j in range(i + 1, count):
+				var id_b: String = ids[j]
+				var offset: Vector3 = pos_a - pos[id_b]
+				var min_distance: float = rad_a + rad[id_b]
+				var distance := offset.length()
+				if distance >= min_distance:
+					continue
+				var normal: Vector3
+				if distance > 0.0001:
+					normal = offset / distance
+				else:
+					normal = Vector3(rng.randf_range(-1.0, 1.0), 0.0, rng.randf_range(-1.0, 1.0)).normalized()
+					distance = 0.0
+				var overlap := min_distance - distance
+				var move_b: bool = movable[id_b]
+				if move_a and move_b:
+					pos_a += normal * (overlap * 0.5)
+					pos[id_b] -= normal * (overlap * 0.5)
+				elif move_a:
+					pos_a += normal * overlap
+				elif move_b:
+					pos[id_b] -= normal * overlap
+			pos[id_a] = pos_a
+	for object_id in ids:
+		var obj: Dictionary = objects[object_id]
+		obj["position"] = _clamp_to_play_area(pos[object_id])
+		objects[object_id] = obj
 
 
 func _clamp_to_play_area(position: Vector3) -> Vector3:
