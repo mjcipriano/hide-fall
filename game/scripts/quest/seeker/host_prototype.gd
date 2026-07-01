@@ -29,6 +29,10 @@ var grip_was_pressed := false
 var scan_was_pressed := false
 var last_scan_text := "scan ready"
 var launch_gameplay_logged := false
+var held_prev_position := Vector3.ZERO
+var held_velocity := Vector3.ZERO
+var has_prev_held_pos := false
+var sfx_players: Dictionary = {}
 
 var camera: Camera3D
 var xr_origin: XROrigin3D
@@ -68,6 +72,7 @@ func _ready() -> void:
 	simulation.add_bot_hiders(2)
 	_build_world()
 	_build_hud()
+	_setup_audio()
 	if _should_auto_start_solo_round():
 		_start_visible_solo_round()
 	if auto_start_network:
@@ -79,7 +84,7 @@ func _process(delta: float) -> void:
 	_handle_input()
 	_handle_xr_controller_buttons()
 	_update_seeker_pose()
-	_update_held_object()
+	_update_held_object(delta)
 	_update_xr_pointer_dot()
 	simulation.advance(delta)
 	if _is_xr_active() and not launch_gameplay_logged and simulation.objects.size() > 0:
@@ -100,7 +105,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("shoot"):
 		_shoot_at_cursor()
 	if event.is_action_pressed("pickup"):
-		_toggle_pickup()
+		_begin_grab()
+	if event.is_action_released("pickup"):
+		_end_grab()
 	if event.is_action_pressed("scan_pulse"):
 		_use_scan_pulse()
 
@@ -507,15 +514,24 @@ func _update_join_qr(join_payload: String) -> void:
 func _shoot_at_cursor() -> void:
 	if not held_object_id.is_empty():
 		return
+	var ray := _get_seeker_ray()
 	var object_id := _pick_object_from_seeker_ray()
-	if object_id.is_empty():
-		return
-	var result = simulation.shoot_object(object_id)
-	if result.get("accepted", false):
-		if result.get("hit", false):
-			_flash_crosshair(Color(0.2, 1.0, 0.4, 1.0))
-		else:
-			_flash_crosshair(Color(1.0, 0.25, 0.2, 1.0))
+	var endpoint: Vector3 = ray["origin"] + ray["direction"] * 6.0
+	var beam_color := Color(1.0, 0.35, 0.2)
+	_play_sfx("shoot")
+	if not object_id.is_empty():
+		endpoint = simulation.objects[object_id]["position"]
+		var result = simulation.shoot_object(object_id)
+		if result.get("accepted", false):
+			if result.get("hit", false):
+				beam_color = Color(0.3, 1.0, 0.45)
+				_flash_crosshair(Color(0.2, 1.0, 0.4, 1.0))
+				_play_sfx("hit")
+			else:
+				beam_color = Color(1.0, 0.85, 0.25)
+				_flash_crosshair(Color(1.0, 0.25, 0.2, 1.0))
+				_play_sfx("miss")
+	_spawn_laser(ray["origin"], endpoint, beam_color)
 
 
 func _pick_object_from_seeker_ray(max_distance: float = 8.0, radius: float = 0.22) -> String:
@@ -540,18 +556,28 @@ func _pick_object_from_seeker_ray(max_distance: float = 8.0, radius: float = 0.2
 	return best_id
 
 
-func _toggle_pickup() -> void:
+func _begin_grab() -> void:
 	if not held_object_id.is_empty():
-		simulation.set_object_held(held_object_id, false)
-		held_object_id = ""
 		return
 	if simulation.phase != HidefallSimulationScript.PHASE_SEEK:
 		return
-	var object_id := _pick_object_from_seeker_ray(2.4, 0.32)
+	var object_id := _pick_object_from_seeker_ray(2.6, 0.35)
 	if object_id.is_empty():
 		return
 	if simulation.set_object_held(object_id, true):
 		held_object_id = object_id
+		has_prev_held_pos = false
+		held_velocity = Vector3.ZERO
+		_play_sfx("pickup")
+
+
+func _end_grab() -> void:
+	if held_object_id.is_empty():
+		return
+	simulation.release_object(held_object_id, held_velocity)
+	held_object_id = ""
+	has_prev_held_pos = false
+	_play_sfx("drop")
 
 
 func _use_scan_pulse() -> void:
@@ -565,13 +591,23 @@ func _use_scan_pulse() -> void:
 	_flash_crosshair(Color(0.1, 0.8, 1.0, 1.0))
 
 
-func _update_held_object() -> void:
+func _update_held_object(delta: float) -> void:
 	if held_object_id.is_empty():
 		return
 	var ray := _get_seeker_ray()
-	var held_position: Vector3 = ray["origin"] + ray["direction"] * 0.65
-	if not simulation.move_held_object(held_object_id, held_position):
+	# Snap the prop to the hand/controller grip so it tracks the hand, not a
+	# far pointer offset.
+	var grab_point: Vector3 = ray["origin"] + ray["direction"] * 0.08
+	if not simulation.move_held_object(held_object_id, grab_point):
 		held_object_id = ""
+		has_prev_held_pos = false
+		return
+	var actual: Vector3 = simulation.objects[held_object_id]["position"]
+	if has_prev_held_pos and delta > 0.0:
+		var instant_velocity: Vector3 = (actual - held_prev_position) / delta
+		held_velocity = held_velocity.lerp(instant_velocity, 0.5)
+	held_prev_position = actual
+	has_prev_held_pos = true
 
 
 func _update_xr_pointer_dot() -> void:
@@ -665,7 +701,9 @@ func _handle_xr_controller_buttons() -> void:
 	if trigger_pressed and not trigger_was_pressed:
 		_shoot_at_cursor()
 	if grip_pressed and not grip_was_pressed:
-		_toggle_pickup()
+		_begin_grab()
+	if not grip_pressed and grip_was_pressed:
+		_end_grab()
 	if scan_pressed and not scan_was_pressed:
 		_activate_primary_action()
 	trigger_was_pressed = trigger_pressed
@@ -818,6 +856,110 @@ func _flash_crosshair(color: Color) -> void:
 	crosshair.color = color
 	var tween := create_tween()
 	tween.tween_property(crosshair, "color", Color(1.0, 1.0, 1.0, 0.85), 0.25)
+
+
+func _setup_audio() -> void:
+	for key in ["shoot", "pickup", "drop", "hit", "miss"]:
+		var player := AudioStreamPlayer.new()
+		player.name = "Sfx_" + key
+		player.stream = _make_sfx(key)
+		player.volume_db = -4.0
+		add_child(player)
+		sfx_players[key] = player
+
+
+func _play_sfx(sfx_name: String) -> void:
+	var player: AudioStreamPlayer = sfx_players.get(sfx_name)
+	if player != null:
+		player.play()
+
+
+# Procedurally synthesizes short 16-bit sound effects so the build needs no
+# bundled audio assets.
+func _make_sfx(kind: String) -> AudioStreamWAV:
+	var mix_rate := 22050
+	var duration := 0.2
+	match kind:
+		"pickup":
+			duration = 0.09
+		"drop":
+			duration = 0.14
+		"shoot":
+			duration = 0.22
+		"hit":
+			duration = 0.3
+		"miss":
+			duration = 0.22
+	var sample_count := int(mix_rate * duration)
+	var data := PackedByteArray()
+	data.resize(sample_count * 2)
+	for i in sample_count:
+		var t := float(i) / mix_rate
+		var progress := t / duration
+		var sample := 0.0
+		var envelope := 1.0
+		match kind:
+			"shoot":
+				var sweep := lerpf(1500.0, 320.0, progress)
+				sample = sin(TAU * sweep * t) + 0.3 * (randf() * 2.0 - 1.0)
+				envelope = pow(1.0 - progress, 1.5)
+			"pickup":
+				var rise := lerpf(520.0, 900.0, progress)
+				sample = sin(TAU * rise * t)
+				envelope = sin(PI * progress)
+			"drop":
+				sample = sin(TAU * 140.0 * t) + 0.4 * (randf() * 2.0 - 1.0)
+				envelope = pow(1.0 - progress, 2.0)
+			"hit":
+				var chime := lerpf(660.0, 1180.0, progress)
+				sample = sin(TAU * chime * t) + 0.4 * sin(TAU * chime * 2.0 * t)
+				envelope = sin(PI * progress)
+			"miss":
+				sample = (1.0 if sin(TAU * 165.0 * t) >= 0.0 else -1.0) * 0.7
+				envelope = pow(1.0 - progress, 1.2)
+		var value := int(clampf(sample * envelope * 0.6, -1.0, 1.0) * 32767.0)
+		data.encode_s16(i * 2, value)
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = mix_rate
+	wav.stereo = false
+	wav.data = data
+	return wav
+
+
+# Brief emissive tracer from the controller to the shot point.
+func _spawn_laser(from: Vector3, to: Vector3, color: Color) -> void:
+	var length := from.distance_to(to)
+	if length < 0.05:
+		return
+	var beam := MeshInstance3D.new()
+	beam.name = "ShotLaser"
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = 0.006
+	mesh.bottom_radius = 0.006
+	mesh.height = length
+	mesh.radial_segments = 8
+	beam.mesh = mesh
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.emission_enabled = true
+	material.emission = color
+	material.emission_energy_multiplier = 4.0
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	beam.material_override = material
+	add_child(beam)
+	var axis_y := (to - from).normalized()
+	var axis_x := axis_y.cross(Vector3.UP)
+	if axis_x.length() < 0.001:
+		axis_x = axis_y.cross(Vector3.RIGHT)
+	axis_x = axis_x.normalized()
+	var axis_z := axis_x.cross(axis_y).normalized()
+	beam.global_transform = Transform3D(Basis(axis_x, axis_y, axis_z), (from + to) * 0.5)
+	var tween := create_tween()
+	tween.tween_property(material, "albedo_color:a", 0.0, 0.18)
+	tween.parallel().tween_property(material, "emission_energy_multiplier", 0.0, 0.18)
+	tween.tween_callback(beam.queue_free)
 
 
 func _start_network_host() -> void:

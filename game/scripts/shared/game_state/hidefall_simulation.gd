@@ -191,11 +191,13 @@ func advance(delta: float) -> void:
 				_set_phase(PHASE_BLACKOUT)
 		PHASE_BLACKOUT:
 			_update_bot_inputs(delta)
+			_integrate_free_decoys(delta)
 			if phase_elapsed >= float(config.get_value("round", "blackout_seconds", 10.0)):
 				_set_phase(PHASE_SEEK)
 		PHASE_SEEK:
 			_update_bot_inputs(delta)
 			_integrate_hider_motion(delta)
+			_integrate_free_decoys(delta)
 			if _live_hider_count() == 0:
 				stats["all_hiders_found"] = true
 				stats["time_bonus"] = _time_remaining()
@@ -297,6 +299,46 @@ func set_object_held(object_id: String, held: bool) -> bool:
 		obj["inspected_survived"] = int(obj.get("inspected_survived", 0)) + 1
 	objects[object_id] = obj
 	return true
+
+
+func release_object(object_id: String, velocity: Vector3 = Vector3.ZERO) -> bool:
+	if not objects.has(object_id):
+		return false
+	var obj: Dictionary = objects[object_id]
+	if not obj.get("held_by_seeker", false):
+		return false
+	obj["held_by_seeker"] = false
+	obj["velocity"] = velocity.limit_length(8.0)
+	if obj.get("is_hider", false) and obj.get("alive", false):
+		obj["inspected_survived"] = int(obj.get("inspected_survived", 0)) + 1
+	objects[object_id] = obj
+	return true
+
+
+# Gravity + floor settling for free (unheld) decoys so dropped and thrown props
+# fall and slide instead of hanging in the air. Resting props sleep to stay cheap.
+func _integrate_free_decoys(delta: float) -> void:
+	for object_id in objects:
+		var obj: Dictionary = objects[object_id]
+		if obj.get("is_hider", false) or obj.get("held_by_seeker", false):
+			continue
+		var velocity: Vector3 = obj["velocity"]
+		var position: Vector3 = obj["position"]
+		if position.y <= 0.1501 and velocity.length() < 0.06:
+			if velocity != Vector3.ZERO:
+				obj["velocity"] = Vector3.ZERO
+				objects[object_id] = obj
+			continue
+		velocity.y -= 9.8 * delta
+		position += velocity * delta
+		if position.y <= 0.15:
+			position.y = 0.15
+			velocity.y = abs(velocity.y) * 0.22
+			velocity.x *= 0.9
+			velocity.z *= 0.9
+		obj["velocity"] = velocity.limit_length(8.0)
+		obj["position"] = _clamp_to_play_area(position)
+		objects[object_id] = obj
 
 
 func move_held_object(object_id: String, position: Vector3) -> bool:
@@ -530,19 +572,28 @@ func _integrate_hider_motion(delta: float) -> void:
 			continue
 		obj["shape_cooldown"] = max(0.0, float(obj["shape_cooldown"]) - delta)
 		obj["color_cooldown"] = max(0.0, float(obj["color_cooldown"]) - delta)
-		if obj.get("freeze", false):
+		var airborne: bool = obj["position"].y > 0.151
+		if obj.get("freeze", false) and not airborne:
 			obj["velocity"] = Vector3.ZERO
 			if obj["position"].distance_to(seeker_position) < 1.5:
 				obj["freeze_near_seconds"] = float(obj["freeze_near_seconds"]) + delta
 		else:
-			var move: Vector2 = obj.get("move_input", Vector2.ZERO)
+			var move: Vector2 = Vector2.ZERO if airborne else obj.get("move_input", Vector2.ZERO)
 			var speed := float(config.get_value("hiders", "movement_speed", 1.0))
 			var acceleration := Vector3(move.x, 0.0, move.y) * speed * 4.0
 			var velocity: Vector3 = obj["velocity"]
-			velocity += acceleration * delta
-			velocity *= 0.88
-			obj["velocity"] = velocity.limit_length(2.4 * speed)
-			obj["position"] = _clamp_to_play_area(obj["position"] + obj["velocity"] * delta)
+			velocity.x = (velocity.x + acceleration.x * delta) * 0.88
+			velocity.z = (velocity.z + acceleration.z * delta) * 0.88
+			var planar := Vector2(velocity.x, velocity.z).limit_length(2.4 * speed)
+			velocity.x = planar.x
+			velocity.z = planar.y
+			velocity.y -= 9.8 * delta
+			var next_position: Vector3 = obj["position"] + velocity * delta
+			if next_position.y <= 0.15:
+				next_position.y = 0.15
+				velocity.y = 0.0
+			obj["velocity"] = velocity
+			obj["position"] = _clamp_to_play_area(next_position)
 		objects[object_id] = obj
 
 

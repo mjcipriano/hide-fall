@@ -39,6 +39,7 @@ func _run() -> void:
 	_test_timeout_results()
 	_test_disconnect_and_soak()
 	_test_object_collisions()
+	_test_dropped_object_gravity()
 	await _test_host_scene_smoke()
 	await _test_mobile_scene_smoke()
 	_test_websocket_host_instantiates()
@@ -244,6 +245,26 @@ func _test_object_collisions() -> void:
 	_assert(sim.objects[b]["position"].distance_to(sim.objects[a]["position"]) >= min_distance - 0.02, "held prop still pushes neighbors away")
 
 
+func _test_dropped_object_gravity() -> void:
+	var sim = _new_sim(555)
+	sim.add_hider("Solo", false)
+	sim.start_round()
+	sim.confirm_room_setup()
+	_advance_for(sim, 20.4)
+	_assert(sim.phase == HidefallSimulationScript.PHASE_SEEK, "gravity test reaches seek phase")
+	var decoy: String = sim.get_decoy_object_ids()[0]
+	_assert(sim.set_object_held(decoy, true), "decoy can be grabbed")
+	sim.move_held_object(decoy, Vector3(0.0, 1.2, 0.0))
+	_assert(sim.objects[decoy]["position"].y > 1.0, "held prop lifts to hand height")
+	var start_y: float = sim.objects[decoy]["position"].y
+	_assert(sim.release_object(decoy, Vector3.ZERO), "held prop can be released")
+	for _frame in 60:
+		sim.advance(0.033)
+	var end_y: float = sim.objects[decoy]["position"].y
+	_assert(end_y < start_y - 0.3, "released prop falls under gravity")
+	_assert(end_y <= 0.2, "released prop settles on the floor")
+
+
 func _test_host_scene_smoke() -> void:
 	var packed_scene = load("res://scenes/quest/host_prototype.tscn")
 	_assert(packed_scene != null, "host prototype scene loads")
@@ -295,12 +316,13 @@ func _test_host_scene_smoke() -> void:
 	var pick_id: String = scene.simulation.get_decoy_object_ids()[0]
 	scene.simulation.objects[pick_id]["position"] = ray["origin"] + ray["direction"] * 1.0
 	_assert(scene._pick_object_from_seeker_ray() == pick_id, "host ray picks object")
-	scene._toggle_pickup()
-	_assert(scene.held_object_id == pick_id, "host pickup holds object")
-	scene._update_held_object()
+	scene._begin_grab()
+	_assert(scene.held_object_id == pick_id, "host grip grabs object")
+	scene._update_held_object(0.016)
 	_assert(scene.simulation.objects[pick_id]["held_by_seeker"], "host updates held object")
-	scene._toggle_pickup()
-	_assert(scene.held_object_id.is_empty(), "host pickup toggles drop")
+	scene._end_grab()
+	_assert(scene.held_object_id.is_empty(), "host grip release drops object")
+	_assert(not scene.simulation.objects[pick_id]["held_by_seeker"], "released prop is no longer held")
 	var scan_before: int = scene.simulation.scan_pulses_remaining
 	scene._use_scan_pulse()
 	_assert(scene.simulation.scan_pulses_remaining == max(0, scan_before - 1), "host scan pulse consumes pulse")
