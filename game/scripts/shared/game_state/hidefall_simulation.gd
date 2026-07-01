@@ -315,8 +315,9 @@ func release_object(object_id: String, velocity: Vector3 = Vector3.ZERO) -> bool
 	return true
 
 
-# Gravity + floor settling for free (unheld) decoys so dropped and thrown props
-# fall and slide instead of hanging in the air. Resting props sleep to stay cheap.
+# Gravity + settling for free (unheld) decoys. Props fall until they land on the
+# floor or come to rest on top of another prop whose footprint they overlap, so
+# flat props placed squarely on others stack instead of sliding off.
 func _integrate_free_decoys(delta: float) -> void:
 	for object_id in objects:
 		var obj: Dictionary = objects[object_id]
@@ -324,21 +325,51 @@ func _integrate_free_decoys(delta: float) -> void:
 			continue
 		var velocity: Vector3 = obj["velocity"]
 		var position: Vector3 = obj["position"]
-		if position.y <= 0.1501 and velocity.length() < 0.06:
-			if velocity != Vector3.ZERO:
+		# Only props that are off the floor or still moving can be stacked; floor
+		# props short-circuit the O(n) support scan.
+		var support_y := 0.15
+		if position.y > 0.16 or velocity.length() >= 0.06:
+			support_y = _support_height(object_id, obj)
+		if position.y <= support_y + 0.002 and velocity.length() < 0.06:
+			if position.y != support_y or velocity != Vector3.ZERO:
 				obj["velocity"] = Vector3.ZERO
+				obj["position"] = _clamp_to_play_area(Vector3(position.x, support_y, position.z))
 				objects[object_id] = obj
 			continue
 		velocity.y -= 9.8 * delta
 		position += velocity * delta
-		if position.y <= 0.15:
-			position.y = 0.15
-			velocity.y = abs(velocity.y) * 0.22
-			velocity.x *= 0.9
-			velocity.z *= 0.9
+		if position.y <= support_y:
+			position.y = support_y
+			velocity.y = abs(velocity.y) * 0.18
+			velocity.x *= 0.85
+			velocity.z *= 0.85
 		obj["velocity"] = velocity.limit_length(8.0)
 		obj["position"] = _clamp_to_play_area(position)
 		objects[object_id] = obj
+
+
+# Highest resting center height for a prop: the floor, or the top of any prop
+# whose footprint it sits squarely over.
+func _support_height(object_id: String, obj: Dictionary) -> float:
+	var support := 0.15
+	var self_radius := float(obj.get("collision_radius", 0.18))
+	var self_half := float(obj.get("half_height", 0.15))
+	var position: Vector3 = obj["position"]
+	for other_id in objects:
+		if other_id == object_id:
+			continue
+		var other: Dictionary = objects[other_id]
+		if other.get("is_hider", false) and not other.get("alive", true):
+			continue
+		var other_position: Vector3 = other["position"]
+		if other_position.y >= position.y + 0.02:
+			continue
+		var footprint := Vector2(position.x - other_position.x, position.z - other_position.z).length()
+		if footprint < (self_radius + float(other.get("collision_radius", 0.18))) * 0.7:
+			var top := other_position.y + float(other.get("half_height", 0.15)) + self_half
+			if top > support:
+				support = top
+	return support
 
 
 func move_held_object(object_id: String, position: Vector3) -> bool:
@@ -501,13 +532,16 @@ func _create_object(is_hider: bool, owner_player_id: String) -> String:
 	var y := float(config.get_value("objects", "spawn_height_meters", 2.5)) if not is_hider else 0.15
 	var position := Vector3(cos(angle) * radius, y, sin(angle) * radius)
 	var shape: String = content.pick_weighted_shape(rng)
+	var rotation_y := rng.randf_range(0.0, TAU)
 	objects[object_id] = {
 		"object_id": object_id,
 		"shape": shape,
 		"collision_radius": _collision_radius_for_shape(shape),
+		"half_height": _half_height_for_shape(shape),
 		"color": content.pick_color(rng),
 		"position": position,
-		"rotation_y": rng.randf_range(0.0, TAU),
+		"rotation_y": rotation_y,
+		"orientation": Quaternion(Vector3.UP, rotation_y),
 		"velocity": Vector3(rng.randf_range(-0.3, 0.3), 0.0, rng.randf_range(-0.3, 0.3)),
 		"move_input": Vector2.ZERO,
 		"freeze": false,
@@ -614,6 +648,7 @@ func _try_change_shape(obj: Dictionary, shape_id: String) -> void:
 		return
 	obj["shape"] = shape_id
 	obj["collision_radius"] = _collision_radius_for_shape(shape_id)
+	obj["half_height"] = _half_height_for_shape(shape_id)
 	obj["shape_cooldown"] = float(config.get_value("hiders", "shape_change_cooldown", 12.0))
 
 
@@ -700,13 +735,32 @@ func _collision_radius_for_shape(shape_id: String) -> float:
 	return 0.18
 
 
-# Positional sphere collision so props push each other apart instead of
-# interpenetrating. Held props and eliminated hiders shove others but are not
-# themselves displaced. A couple of relaxation passes keeps dense piles stable.
+# Vertical half-extent used for stacking: how high above a prop's center its top
+# surface sits, and how far its resting center is above whatever supports it.
+func _half_height_for_shape(shape_id: String) -> float:
+	match shape_id:
+		"ring":
+			return 0.08
+		"cube", "toy_block", "pyramid", "star":
+			return 0.14
+		"sphere", "duck":
+			return 0.16
+		"cylinder", "can", "mug", "cone":
+			return 0.17
+		"capsule":
+			return 0.18
+	return 0.15
+
+
+# Horizontal collision so props push each other apart instead of interpenetrating.
+# Separation only applies to props that actually overlap vertically, so a prop
+# resting on top of another (stacked) is left alone instead of sliding off. Held
+# props and eliminated hiders shove others but are not themselves displaced.
 func _resolve_collisions(iterations: int = 2) -> void:
 	var ids: Array = []
 	var pos: Dictionary = {}
 	var rad: Dictionary = {}
+	var half: Dictionary = {}
 	var movable: Dictionary = {}
 	for object_id in objects:
 		var obj: Dictionary = objects[object_id]
@@ -715,6 +769,7 @@ func _resolve_collisions(iterations: int = 2) -> void:
 		ids.append(object_id)
 		pos[object_id] = obj["position"]
 		rad[object_id] = float(obj.get("collision_radius", 0.18))
+		half[object_id] = float(obj.get("half_height", 0.15))
 		movable[object_id] = not obj.get("held_by_seeker", false)
 	var count := ids.size()
 	if count < 2:
@@ -724,29 +779,35 @@ func _resolve_collisions(iterations: int = 2) -> void:
 			var id_a: String = ids[i]
 			var pos_a: Vector3 = pos[id_a]
 			var rad_a: float = rad[id_a]
+			var half_a: float = half[id_a]
 			var move_a: bool = movable[id_a]
 			for j in range(i + 1, count):
 				var id_b: String = ids[j]
-				var offset: Vector3 = pos_a - pos[id_b]
+				var pos_b: Vector3 = pos[id_b]
+				# Skip props that are stacked (vertically clear of each other).
+				if abs(pos_a.y - pos_b.y) >= half_a + half[id_b] - 0.02:
+					continue
+				var offset := Vector2(pos_a.x - pos_b.x, pos_a.z - pos_b.z)
 				var min_distance: float = rad_a + rad[id_b]
 				var distance := offset.length()
 				if distance >= min_distance:
 					continue
-				var normal: Vector3
+				var normal: Vector2
 				if distance > 0.0001:
 					normal = offset / distance
 				else:
-					normal = Vector3(rng.randf_range(-1.0, 1.0), 0.0, rng.randf_range(-1.0, 1.0)).normalized()
+					normal = Vector2(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0)).normalized()
 					distance = 0.0
 				var overlap := min_distance - distance
 				var move_b: bool = movable[id_b]
+				var push := Vector3(normal.x, 0.0, normal.y)
 				if move_a and move_b:
-					pos_a += normal * (overlap * 0.5)
-					pos[id_b] -= normal * (overlap * 0.5)
+					pos_a += push * (overlap * 0.5)
+					pos[id_b] = pos_b - push * (overlap * 0.5)
 				elif move_a:
-					pos_a += normal * overlap
+					pos_a += push * overlap
 				elif move_b:
-					pos[id_b] -= normal * overlap
+					pos[id_b] = pos_b - push * overlap
 			pos[id_a] = pos_a
 	for object_id in ids:
 		var obj: Dictionary = objects[object_id]

@@ -32,6 +32,7 @@ var launch_gameplay_logged := false
 var held_prev_position := Vector3.ZERO
 var held_velocity := Vector3.ZERO
 var has_prev_held_pos := false
+var held_grab_offset := Transform3D()
 var sfx_players: Dictionary = {}
 
 var camera: Camera3D
@@ -227,7 +228,7 @@ func _build_hud() -> void:
 	help_label.position = Vector2(20, 580)
 	help_label.size = Vector2(900, 110)
 	help_label.add_theme_font_size_override("font_size", 16)
-	help_label.text = "R: start/confirm setup/rematch  |  Click/trigger: shoot  |  E/grip: pick up/drop  |  Q/A: scan pulse  |  WASD local hider"
+	help_label.text = "R: start/confirm/rematch  |  Click/trigger: shoot  |  Hold E/grip: grab & turn, release to drop  |  Q/A: scan pulse  |  WASD local hider"
 	canvas.add_child(help_label)
 
 	crosshair = ColorRect.new()
@@ -252,7 +253,8 @@ func _build_hud() -> void:
 func _build_xr_hud() -> void:
 	xr_hud_root = Node3D.new()
 	xr_hud_root.name = "XRWorldHud"
-	xr_hud_root.position = Vector3(-0.88, -0.30, -2.25)
+	# Low-centered so it reads like a HUD and stays out of the play space.
+	xr_hud_root.position = Vector3(0.0, -0.46, -1.9)
 	if camera != null:
 		camera.add_child(xr_hud_root)
 	else:
@@ -261,69 +263,71 @@ func _build_xr_hud() -> void:
 	var status_panel := MeshInstance3D.new()
 	status_panel.name = "StatusPanel"
 	var status_panel_mesh := QuadMesh.new()
-	status_panel_mesh.size = Vector2(2.25, 0.82)
+	status_panel_mesh.size = Vector2(1.5, 0.66)
 	status_panel.mesh = status_panel_mesh
-	status_panel.position = Vector3(0.78, 0.05, 0.035)
-	status_panel.material_override = _hud_panel_material(Color(0.02, 0.03, 0.04, 0.78))
+	status_panel.position = Vector3(0.0, 0.0, 0.0)
+	status_panel.material_override = _hud_panel_material(Color(0.02, 0.03, 0.04, 0.72))
 	xr_hud_root.add_child(status_panel)
+
+	xr_phase_label = Label3D.new()
+	xr_phase_label.name = "PhaseText"
+	xr_phase_label.font_size = 30
+	xr_phase_label.outline_size = 8
+	xr_phase_label.pixel_size = 0.0019
+	xr_phase_label.width = 1500.0
+	xr_phase_label.position = Vector3(-0.68, 0.24, 0.01)
+	xr_phase_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	xr_phase_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	xr_phase_label.modulate = Color(1.0, 0.92, 0.35, 1.0)
+	xr_hud_root.add_child(xr_phase_label)
 
 	xr_hud_label = Label3D.new()
 	xr_hud_label.name = "StatusText"
-	xr_hud_label.font_size = 24
-	xr_hud_label.outline_size = 8
+	xr_hud_label.font_size = 22
+	xr_hud_label.outline_size = 6
 	xr_hud_label.modulate = Color(0.92, 0.98, 1.0, 1.0)
-	xr_hud_label.pixel_size = 0.0022
-	xr_hud_label.width = 920.0
-	xr_hud_label.position = Vector3(0.0, 0.34, 0.0)
+	xr_hud_label.pixel_size = 0.0019
+	xr_hud_label.width = 1500.0
+	xr_hud_label.position = Vector3(-0.68, 0.0, 0.01)
 	xr_hud_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	xr_hud_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	xr_hud_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	xr_hud_root.add_child(xr_hud_label)
 
 	xr_help_label = Label3D.new()
 	xr_help_label.name = "HelpText"
-	xr_help_label.font_size = 22
+	xr_help_label.font_size = 19
 	xr_help_label.outline_size = 6
-	xr_help_label.modulate = Color(0.85, 0.92, 1.0, 1.0)
-	xr_help_label.pixel_size = 0.002
-	xr_help_label.width = 900.0
-	xr_help_label.position = Vector3(0.0, -0.38, 0.0)
+	xr_help_label.modulate = Color(0.80, 0.88, 1.0, 1.0)
+	xr_help_label.pixel_size = 0.0019
+	xr_help_label.width = 1500.0
+	xr_help_label.position = Vector3(-0.68, -0.23, 0.01)
 	xr_help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	xr_help_label.text = "A: start/confirm/scan  |  Trigger: shoot  |  Grip: pick up/drop"
+	xr_help_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	xr_help_label.text = "Trigger shoot   Hold grip grab & turn   Release drop   A start / scan"
 	xr_hud_root.add_child(xr_help_label)
 
-	var phase_panel := MeshInstance3D.new()
-	phase_panel.name = "PhasePanel"
-	var phase_panel_mesh := QuadMesh.new()
-	phase_panel_mesh.size = Vector2(1.45, 0.34)
-	phase_panel.mesh = phase_panel_mesh
-	phase_panel.position = Vector3(1.12, 0.62, 0.03)
-	phase_panel.material_override = _hud_panel_material(Color(0.0, 0.12, 0.16, 0.82))
-	xr_hud_root.add_child(phase_panel)
-
-	xr_phase_label = Label3D.new()
-	xr_phase_label.name = "PhaseText"
-	xr_phase_label.font_size = 36
-	xr_phase_label.outline_size = 8
-	xr_phase_label.pixel_size = 0.0022
-	xr_phase_label.width = 620.0
-	xr_phase_label.position = Vector3(0.48, 0.71, 0.0)
-	xr_phase_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	xr_phase_label.modulate = Color(1.0, 0.92, 0.35, 1.0)
-	xr_hud_root.add_child(xr_phase_label)
+	var qr_label := Label3D.new()
+	qr_label.name = "JoinQrLabel"
+	qr_label.font_size = 18
+	qr_label.outline_size = 5
+	qr_label.pixel_size = 0.0018
+	qr_label.position = Vector3(1.06, 0.24, 0.0)
+	qr_label.modulate = Color(0.85, 0.95, 1.0, 1.0)
+	qr_label.text = "Scan to join"
+	xr_hud_root.add_child(qr_label)
 
 	xr_qr_sprite = Sprite3D.new()
 	xr_qr_sprite.name = "JoinQr"
-	xr_qr_sprite.pixel_size = 0.0021
-	xr_qr_sprite.position = Vector3(1.45, 0.10, 0.0)
-	xr_qr_sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	xr_qr_sprite.pixel_size = 0.0016
+	xr_qr_sprite.position = Vector3(1.06, 0.0, 0.0)
 	xr_hud_root.add_child(xr_qr_sprite)
 
 	xr_blackout_panel = MeshInstance3D.new()
 	xr_blackout_panel.name = "BlackoutPanel"
 	var blackout_mesh := QuadMesh.new()
-	blackout_mesh.size = Vector2(3.4, 2.0)
+	blackout_mesh.size = Vector2(4.0, 2.6)
 	xr_blackout_panel.mesh = blackout_mesh
-	xr_blackout_panel.position = Vector3(0.78, 0.0, -0.08)
+	xr_blackout_panel.position = Vector3(0.0, 0.46, -0.35)
 	xr_blackout_panel.visible = false
 	xr_blackout_panel.material_override = _hud_panel_material(Color(0.0, 0.0, 0.0, 0.72))
 	xr_hud_root.add_child(xr_blackout_panel)
@@ -429,10 +433,13 @@ func _update_objects() -> void:
 	for object_id in simulation.objects:
 		if not object_nodes.has(object_id):
 			continue
+		# The held prop's transform is driven by the hand in _update_held_object.
+		if object_id == held_object_id:
+			continue
 		var obj: Dictionary = simulation.objects[object_id]
 		var node: MeshInstance3D = object_nodes[object_id]
 		node.position = obj["position"]
-		node.rotation.y = float(obj.get("rotation_y", 0.0))
+		node.quaternion = obj.get("orientation", Quaternion(Vector3.UP, float(obj.get("rotation_y", 0.0))))
 		node.visible = obj.get("alive", true) or not obj.get("is_hider", false)
 		var material: StandardMaterial3D = object_materials[object_id]
 		material.albedo_color = Color(content.get_color_hex(obj["color"]))
@@ -474,7 +481,13 @@ func _update_hud() -> void:
 	if hud_label != null:
 		hud_label.text = status_text
 	if xr_hud_label != null:
-		xr_hud_label.text = status_text
+		xr_hud_label.text = "Time %.0fs   Shots %d   Scans %d   Live props %d   In room %d" % [
+			float(snapshot["time_remaining"]),
+			int(snapshot["shots_remaining"]),
+			int(snapshot.get("scan_pulses_remaining", 0)),
+			_live_hider_count(),
+			simulation.objects.size()
+		]
 	if xr_phase_label != null:
 		xr_phase_label.text = _phase_instruction_text()
 	if xr_blackout_panel != null:
@@ -556,19 +569,42 @@ func _pick_object_from_seeker_ray(max_distance: float = 8.0, radius: float = 0.2
 	return best_id
 
 
+func _grab_source() -> Node3D:
+	if right_controller != null and right_controller.get_is_active():
+		return right_controller
+	return camera
+
+
+func _can_grab_phase() -> bool:
+	match simulation.phase:
+		HidefallSimulationScript.PHASE_OBJECT_RAIN, HidefallSimulationScript.PHASE_BLACKOUT, HidefallSimulationScript.PHASE_SEEK:
+			return true
+	return false
+
+
 func _begin_grab() -> void:
 	if not held_object_id.is_empty():
 		return
-	if simulation.phase != HidefallSimulationScript.PHASE_SEEK:
+	if not _can_grab_phase():
+		_flash_crosshair(Color(0.65, 0.65, 0.65, 1.0))
 		return
 	var object_id := _pick_object_from_seeker_ray(2.6, 0.35)
 	if object_id.is_empty():
 		return
-	if simulation.set_object_held(object_id, true):
-		held_object_id = object_id
-		has_prev_held_pos = false
-		held_velocity = Vector3.ZERO
-		_play_sfx("pickup")
+	if not simulation.set_object_held(object_id, true):
+		return
+	held_object_id = object_id
+	has_prev_held_pos = false
+	held_velocity = Vector3.ZERO
+	# Preserve where on the prop the hand grabbed it (edge grab) plus its
+	# orientation, so it holds and turns naturally instead of snapping to center.
+	var source := _grab_source()
+	var node: MeshInstance3D = object_nodes.get(object_id)
+	if source != null and node != null:
+		held_grab_offset = source.global_transform.affine_inverse() * node.global_transform
+	else:
+		held_grab_offset = Transform3D(Basis(), Vector3(0.0, 0.0, -0.2))
+	_play_sfx("pickup")
 
 
 func _end_grab() -> void:
@@ -594,15 +630,22 @@ func _use_scan_pulse() -> void:
 func _update_held_object(delta: float) -> void:
 	if held_object_id.is_empty():
 		return
-	var ray := _get_seeker_ray()
-	# Snap the prop to the hand/controller grip so it tracks the hand, not a
-	# far pointer offset.
-	var grab_point: Vector3 = ray["origin"] + ray["direction"] * 0.08
-	if not simulation.move_held_object(held_object_id, grab_point):
+	var source := _grab_source()
+	var node: MeshInstance3D = object_nodes.get(held_object_id)
+	if source == null or node == null:
+		return
+	# Reproduce the grab pose relative to the hand: preserves the edge offset and
+	# lets the prop twist and turn with the controller.
+	var target := source.global_transform * held_grab_offset
+	if not simulation.move_held_object(held_object_id, target.origin):
 		held_object_id = ""
 		has_prev_held_pos = false
 		return
 	var actual: Vector3 = simulation.objects[held_object_id]["position"]
+	var orientation := target.basis.orthonormalized().get_rotation_quaternion()
+	node.global_position = actual
+	node.quaternion = orientation
+	simulation.objects[held_object_id]["orientation"] = orientation
 	if has_prev_held_pos and delta > 0.0:
 		var instant_velocity: Vector3 = (actual - held_prev_position) / delta
 		held_velocity = held_velocity.lerp(instant_velocity, 0.5)
@@ -761,17 +804,17 @@ func _is_xr_active() -> bool:
 func _phase_instruction_text() -> String:
 	match simulation.phase:
 		HidefallSimulationScript.PHASE_LOBBY:
-			return "LOBBY - press A to start"
+			return "READY - press A to start the hunt"
 		HidefallSimulationScript.PHASE_ROOM_SETUP:
-			return "SETUP - confirm play space"
+			return "SETUP - press A to confirm your play space"
 		HidefallSimulationScript.PHASE_OBJECT_RAIN:
-			return "OBJECT RAIN - props are falling"
+			return "PROPS FALLING - grab and toss them while they land"
 		HidefallSimulationScript.PHASE_BLACKOUT:
-			return "BLACKOUT - hiders are hiding"
+			return "BLACKOUT - stand still, hiders are hiding"
 		HidefallSimulationScript.PHASE_SEEK:
-			return "HUNT - find the live props"
+			return "HUNT - shoot the live props before time runs out"
 		HidefallSimulationScript.PHASE_RESULTS:
-			return "RESULTS - press A to rematch"
+			return "ROUND OVER - press A to play again"
 	return "HIDEFALL"
 
 

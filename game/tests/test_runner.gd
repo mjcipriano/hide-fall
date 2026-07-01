@@ -40,6 +40,7 @@ func _run() -> void:
 	_test_disconnect_and_soak()
 	_test_object_collisions()
 	_test_dropped_object_gravity()
+	_test_prop_stacking()
 	await _test_host_scene_smoke()
 	await _test_mobile_scene_smoke()
 	_test_websocket_host_instantiates()
@@ -249,20 +250,44 @@ func _test_dropped_object_gravity() -> void:
 	var sim = _new_sim(555)
 	sim.add_hider("Solo", false)
 	sim.start_round()
-	sim.confirm_room_setup()
-	_advance_for(sim, 20.4)
-	_assert(sim.phase == HidefallSimulationScript.PHASE_SEEK, "gravity test reaches seek phase")
 	var decoy: String = sim.get_decoy_object_ids()[0]
+	# Isolate one prop so nothing else can support it, then lift and drop it.
+	sim.objects = {decoy: sim.objects[decoy]}
 	_assert(sim.set_object_held(decoy, true), "decoy can be grabbed")
 	sim.move_held_object(decoy, Vector3(0.0, 1.2, 0.0))
 	_assert(sim.objects[decoy]["position"].y > 1.0, "held prop lifts to hand height")
 	var start_y: float = sim.objects[decoy]["position"].y
 	_assert(sim.release_object(decoy, Vector3.ZERO), "held prop can be released")
-	for _frame in 60:
-		sim.advance(0.033)
+	for _frame in 90:
+		sim._integrate_free_decoys(0.033)
 	var end_y: float = sim.objects[decoy]["position"].y
-	_assert(end_y < start_y - 0.3, "released prop falls under gravity")
+	_assert(end_y < start_y - 0.5, "released prop falls under gravity")
 	_assert(end_y <= 0.2, "released prop settles on the floor")
+
+
+func _test_prop_stacking() -> void:
+	var sim = _new_sim(556)
+	sim.add_hider("Solo", false)
+	sim.start_round()
+	var ids := sim.get_decoy_object_ids()
+	var base_id: String = ids[0]
+	var top_id: String = ids[1]
+	sim.objects = {base_id: sim.objects[base_id], top_id: sim.objects[top_id]}
+	for prop_id in [base_id, top_id]:
+		sim.objects[prop_id]["shape"] = "cube"
+		sim.objects[prop_id]["collision_radius"] = 0.19
+		sim.objects[prop_id]["half_height"] = 0.14
+		sim.objects[prop_id]["velocity"] = Vector3.ZERO
+	sim.objects[base_id]["position"] = Vector3(0.0, 0.15, 0.0)
+	sim.objects[top_id]["position"] = Vector3(0.0, 0.9, 0.0)
+	for _frame in 120:
+		sim._integrate_free_decoys(0.033)
+		sim._resolve_collisions()
+	var base_pos: Vector3 = sim.objects[base_id]["position"]
+	var top_pos: Vector3 = sim.objects[top_id]["position"]
+	_assert(top_pos.y > base_pos.y + 0.2, "flat prop rests on top of another prop")
+	var footprint := Vector2(top_pos.x - base_pos.x, top_pos.z - base_pos.z).length()
+	_assert(footprint < 0.15, "squarely stacked prop does not slide off")
 
 
 func _test_host_scene_smoke() -> void:
