@@ -21,6 +21,7 @@ static func hider_score(hider: Dictionary, seek_seconds: float) -> int:
 	score += int(float(hider.get("freeze_near_seconds", 0.0)) * 5.0)
 	score += int(hider.get("close_calls", 0)) * 250
 	score += int(hider.get("inspected_survived", 0)) * 300
+	score += int(float(hider.get("distance_moved", 0.0)) * 40.0)
 	if seek_seconds > 0.0 and alive_time >= seek_seconds:
 		score += 200
 	return max(score, 0)

@@ -41,6 +41,8 @@ func _run() -> void:
 	_test_object_collisions()
 	_test_dropped_object_gravity()
 	_test_prop_stacking()
+	_test_orientation_settle()
+	_test_scoring_rules()
 	await _test_host_scene_smoke()
 	await _test_mobile_scene_smoke()
 	_test_websocket_host_instantiates()
@@ -288,6 +290,34 @@ func _test_prop_stacking() -> void:
 	_assert(top_pos.y > base_pos.y + 0.2, "flat prop rests on top of another prop")
 	var footprint := Vector2(top_pos.x - base_pos.x, top_pos.z - base_pos.z).length()
 	_assert(footprint < 0.15, "squarely stacked prop does not slide off")
+
+
+func _test_orientation_settle() -> void:
+	var sim = _new_sim(600)
+	sim.add_hider("Solo", false)
+	sim.start_round()
+	var decoy: String = sim.get_decoy_object_ids()[0]
+	sim.objects = {decoy: sim.objects[decoy]}
+	sim.objects[decoy]["position"] = Vector3(0.0, 0.15, 0.0)
+	sim.objects[decoy]["velocity"] = Vector3.ZERO
+	sim.objects[decoy]["orientation"] = Quaternion(Vector3.RIGHT, 0.9)
+	for _frame in 60:
+		sim._integrate_free_decoys(0.033)
+	var settled: Quaternion = sim.objects[decoy]["orientation"]
+	var local_up := settled * Vector3.UP
+	_assert(local_up.dot(Vector3.UP) > 0.99, "dropped prop settles upright onto a flat face")
+
+
+func _test_scoring_rules() -> void:
+	var moving := ScoreCalculator.hider_score({"alive": true, "alive_time": 10.0, "distance_moved": 12.0}, 90.0)
+	var still := ScoreCalculator.hider_score({"alive": true, "alive_time": 10.0, "distance_moved": 0.0}, 90.0)
+	_assert(moving > still, "hiders earn more the more they move")
+	var finder := ScoreCalculator.seeker_score({"correct_shots": 2, "wrong_shots": 0, "all_hiders_found": true})
+	var misser := ScoreCalculator.seeker_score({"correct_shots": 1, "wrong_shots": 0})
+	_assert(finder > misser, "seeker earns points for finding hiders")
+	var clean := ScoreCalculator.seeker_score({"correct_shots": 1, "wrong_shots": 0})
+	var sloppy := ScoreCalculator.seeker_score({"correct_shots": 1, "wrong_shots": 2})
+	_assert(sloppy < clean, "seeker loses points for shooting the wrong prop")
 
 
 func _test_host_scene_smoke() -> void:

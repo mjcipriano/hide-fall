@@ -32,7 +32,10 @@ var launch_gameplay_logged := false
 var held_prev_position := Vector3.ZERO
 var held_velocity := Vector3.ZERO
 var has_prev_held_pos := false
-var held_grab_offset := Transform3D()
+var held_offset_basis := Basis()
+var held_offset_from := Vector3.ZERO
+var held_offset_to := Vector3.ZERO
+var held_offset_t := 1.0
 var sfx_players: Dictionary = {}
 
 var camera: Camera3D
@@ -527,6 +530,12 @@ func _update_join_qr(join_payload: String) -> void:
 func _shoot_at_cursor() -> void:
 	if not held_object_id.is_empty():
 		return
+	if simulation.phase != HidefallSimulationScript.PHASE_SEEK:
+		return
+	if simulation.shots_remaining <= 0:
+		_play_sfx("empty")
+		_flash_crosshair(Color(0.6, 0.6, 0.6, 1.0))
+		return
 	var ray := _get_seeker_ray()
 	var object_id := _pick_object_from_seeker_ray()
 	var endpoint: Vector3 = ray["origin"] + ray["direction"] * 6.0
@@ -600,10 +609,18 @@ func _begin_grab() -> void:
 	# orientation, so it holds and turns naturally instead of snapping to center.
 	var source := _grab_source()
 	var node: MeshInstance3D = object_nodes.get(object_id)
+	var raw := Transform3D(Basis(), Vector3(0.0, 0.0, -0.25))
 	if source != null and node != null:
-		held_grab_offset = source.global_transform.affine_inverse() * node.global_transform
+		raw = source.global_transform.affine_inverse() * node.global_transform
+	held_offset_basis = raw.basis
+	held_offset_from = raw.origin
+	# Distant grabs travel in to a comfortable hold distance; close grabs stay put.
+	var hold_distance := minf(raw.origin.length(), 0.28)
+	if raw.origin.length() > 0.001:
+		held_offset_to = raw.origin.normalized() * hold_distance
 	else:
-		held_grab_offset = Transform3D(Basis(), Vector3(0.0, 0.0, -0.2))
+		held_offset_to = Vector3(0.0, 0.0, -hold_distance)
+	held_offset_t = 0.0
 	_play_sfx("pickup")
 
 
@@ -635,8 +652,11 @@ func _update_held_object(delta: float) -> void:
 	if source == null or node == null:
 		return
 	# Reproduce the grab pose relative to the hand: preserves the edge offset and
-	# lets the prop twist and turn with the controller.
-	var target := source.global_transform * held_grab_offset
+	# lets the prop twist and turn with the controller, easing distant grabs in.
+	held_offset_t = minf(1.0, held_offset_t + delta / 0.22)
+	var eased := held_offset_t * held_offset_t * (3.0 - 2.0 * held_offset_t)
+	var offset := Transform3D(held_offset_basis, held_offset_from.lerp(held_offset_to, eased))
+	var target := source.global_transform * offset
 	if not simulation.move_held_object(held_object_id, target.origin):
 		held_object_id = ""
 		has_prev_held_pos = false
@@ -902,7 +922,7 @@ func _flash_crosshair(color: Color) -> void:
 
 
 func _setup_audio() -> void:
-	for key in ["shoot", "pickup", "drop", "hit", "miss"]:
+	for key in ["shoot", "pickup", "drop", "hit", "miss", "empty"]:
 		var player := AudioStreamPlayer.new()
 		player.name = "Sfx_" + key
 		player.stream = _make_sfx(key)
@@ -933,6 +953,8 @@ func _make_sfx(kind: String) -> AudioStreamWAV:
 			duration = 0.3
 		"miss":
 			duration = 0.22
+		"empty":
+			duration = 0.08
 	var sample_count := int(mix_rate * duration)
 	var data := PackedByteArray()
 	data.resize(sample_count * 2)
@@ -960,6 +982,10 @@ func _make_sfx(kind: String) -> AudioStreamWAV:
 			"miss":
 				sample = (1.0 if sin(TAU * 165.0 * t) >= 0.0 else -1.0) * 0.7
 				envelope = pow(1.0 - progress, 1.2)
+			"empty":
+				# dry double click for an out-of-ammo trigger pull
+				sample = (1.0 if fmod(t * 900.0, 1.0) < 0.5 else -1.0) * 0.5
+				envelope = pow(1.0 - progress, 4.0)
 		var value := int(clampf(sample * envelope * 0.6, -1.0, 1.0) * 32767.0)
 		data.encode_s16(i * 2, value)
 	var wav := AudioStreamWAV.new()

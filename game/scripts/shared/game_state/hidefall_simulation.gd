@@ -331,10 +331,10 @@ func _integrate_free_decoys(delta: float) -> void:
 		if position.y > 0.16 or velocity.length() >= 0.06:
 			support_y = _support_height(object_id, obj)
 		if position.y <= support_y + 0.002 and velocity.length() < 0.06:
-			if position.y != support_y or velocity != Vector3.ZERO:
-				obj["velocity"] = Vector3.ZERO
-				obj["position"] = _clamp_to_play_area(Vector3(position.x, support_y, position.z))
-				objects[object_id] = obj
+			_settle_orientation(obj, delta)
+			obj["velocity"] = Vector3.ZERO
+			obj["position"] = _clamp_to_play_area(Vector3(position.x, support_y, position.z))
+			objects[object_id] = obj
 			continue
 		velocity.y -= 9.8 * delta
 		position += velocity * delta
@@ -343,9 +343,22 @@ func _integrate_free_decoys(delta: float) -> void:
 			velocity.y = abs(velocity.y) * 0.18
 			velocity.x *= 0.85
 			velocity.z *= 0.85
+		_settle_orientation(obj, delta)
 		obj["velocity"] = velocity.limit_length(8.0)
 		obj["position"] = _clamp_to_play_area(position)
 		objects[object_id] = obj
+
+
+# Rotate a settling prop toward an upright, yaw-only pose so props dropped on an
+# edge or corner tip over and come to rest on a flat face.
+func _settle_orientation(obj: Dictionary, delta: float) -> void:
+	var current: Quaternion = obj.get("orientation", Quaternion.IDENTITY)
+	var yaw := current.get_euler(EULER_ORDER_YXZ).y
+	var target := Quaternion(Vector3.UP, yaw)
+	if current.angle_to(target) < 0.02:
+		obj["orientation"] = target
+		return
+	obj["orientation"] = current.slerp(target, clampf(delta * 6.0, 0.0, 1.0)).normalized()
 
 
 # Highest resting center height for a prop: the floor, or the top of any prop
@@ -556,6 +569,7 @@ func _create_object(is_hider: bool, owner_player_id: String) -> String:
 		"freeze_near_seconds": 0.0,
 		"close_calls": 0,
 		"inspected_survived": 0,
+		"distance_moved": 0.0,
 		"bot_decision_time": 0.0
 	}
 	return object_id
@@ -626,8 +640,12 @@ func _integrate_hider_motion(delta: float) -> void:
 			if next_position.y <= 0.15:
 				next_position.y = 0.15
 				velocity.y = 0.0
+			var clamped_next := _clamp_to_play_area(next_position)
+			if phase == PHASE_SEEK:
+				var step := Vector2(clamped_next.x - obj["position"].x, clamped_next.z - obj["position"].z)
+				obj["distance_moved"] = float(obj.get("distance_moved", 0.0)) + step.length()
 			obj["velocity"] = velocity
-			obj["position"] = _clamp_to_play_area(next_position)
+			obj["position"] = clamped_next
 		objects[object_id] = obj
 
 
@@ -685,7 +703,8 @@ func _finish_round() -> void:
 				"alive_time": obj.get("alive_time", 0.0),
 				"freeze_near_seconds": obj.get("freeze_near_seconds", 0.0),
 				"close_calls": obj.get("close_calls", 0),
-				"inspected_survived": obj.get("inspected_survived", 0)
+				"inspected_survived": obj.get("inspected_survived", 0),
+				"distance_moved": obj.get("distance_moved", 0.0)
 			}, seek_seconds)
 			scores[player_id] = hider_score
 			if players.has(player_id):
