@@ -301,11 +301,13 @@ func _test_orientation_settle() -> void:
 	sim.objects[decoy]["position"] = Vector3(0.0, 0.15, 0.0)
 	sim.objects[decoy]["velocity"] = Vector3.ZERO
 	sim.objects[decoy]["orientation"] = Quaternion(Vector3.RIGHT, 0.9)
-	for _frame in 60:
+	for _frame in 120:
 		sim._integrate_free_decoys(0.033)
 	var settled: Quaternion = sim.objects[decoy]["orientation"]
-	var local_up := settled * Vector3.UP
-	_assert(local_up.dot(Vector3.UP) > 0.99, "dropped prop settles upright onto a flat face")
+	# A prop resting flat has world-up aligned with one of its own face axes.
+	var local_up := settled.inverse() * Vector3.UP
+	var axis_alignment := maxf(maxf(absf(local_up.x), absf(local_up.y)), absf(local_up.z))
+	_assert(axis_alignment > 0.999, "dropped prop topples to rest flat on a face")
 
 
 func _test_scoring_rules() -> void:

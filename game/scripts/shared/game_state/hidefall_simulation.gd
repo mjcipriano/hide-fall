@@ -343,22 +343,40 @@ func _integrate_free_decoys(delta: float) -> void:
 			velocity.y = abs(velocity.y) * 0.18
 			velocity.x *= 0.85
 			velocity.z *= 0.85
-		_settle_orientation(obj, delta)
 		obj["velocity"] = velocity.limit_length(8.0)
 		obj["position"] = _clamp_to_play_area(position)
 		objects[object_id] = obj
 
 
-# Rotate a settling prop toward an upright, yaw-only pose so props dropped on an
-# edge or corner tip over and come to rest on a flat face.
+# Tips a resting prop over toward its nearest stable face, the short way it is
+# actually leaning, and accelerates like gravity so it topples naturally instead
+# of spinning back to the pose it spawned in.
 func _settle_orientation(obj: Dictionary, delta: float) -> void:
 	var current: Quaternion = obj.get("orientation", Quaternion.IDENTITY)
-	var yaw := current.get_euler(EULER_ORDER_YXZ).y
-	var target := Quaternion(Vector3.UP, yaw)
-	if current.angle_to(target) < 0.02:
+	# The prop's own face currently pointing most upward should end up on top.
+	var up_face := _nearest_axis(current.inverse() * Vector3.UP)
+	var face_world := (current * up_face).normalized()
+	var target := (Quaternion(face_world, Vector3.UP) * current).normalized()
+	var angle := current.angle_to(target)
+	if angle < 0.01:
 		obj["orientation"] = target
+		obj["topple_speed"] = 0.0
 		return
-	obj["orientation"] = current.slerp(target, clampf(delta * 6.0, 0.0, 1.0)).normalized()
+	var speed := minf(float(obj.get("topple_speed", 0.0)) + 9.0 * delta, 14.0)
+	obj["topple_speed"] = speed
+	var step := minf(speed * delta, angle)
+	obj["orientation"] = current.slerp(target, step / angle).normalized()
+
+
+func _nearest_axis(v: Vector3) -> Vector3:
+	var ax := absf(v.x)
+	var ay := absf(v.y)
+	var az := absf(v.z)
+	if ax >= ay and ax >= az:
+		return Vector3(signf(v.x), 0.0, 0.0)
+	if ay >= az:
+		return Vector3(0.0, signf(v.y), 0.0)
+	return Vector3(0.0, 0.0, signf(v.z))
 
 
 # Highest resting center height for a prop: the floor, or the top of any prop
