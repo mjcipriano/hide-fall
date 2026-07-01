@@ -1,15 +1,18 @@
 [
-  {"id": "cube", "display_name": "Cube", "size_class": "medium", "mass": 1.0, "friction": 0.8, "bounce": 0.25, "roll_factor": 0.1, "rarity_weight": 1.0},
-  {"id": "sphere", "display_name": "Sphere", "size_class": "medium", "mass": 0.8, "friction": 0.35, "bounce": 0.55, "roll_factor": 1.2, "rarity_weight": 1.0},
-  {"id": "cylinder", "display_name": "Cylinder", "size_class": "medium", "mass": 1.1, "friction": 0.6, "bounce": 0.3, "roll_factor": 0.8, "rarity_weight": 1.0},
-  {"id": "cone", "display_name": "Cone", "size_class": "medium", "mass": 0.9, "friction": 0.7, "bounce": 0.25, "roll_factor": 0.45, "rarity_weight": 0.9},
-  {"id": "capsule", "display_name": "Capsule", "size_class": "medium", "mass": 0.9, "friction": 0.45, "bounce": 0.45, "roll_factor": 1.0, "rarity_weight": 0.9},
-  {"id": "pyramid", "display_name": "Pyramid", "size_class": "medium", "mass": 1.0, "friction": 0.85, "bounce": 0.2, "roll_factor": 0.05, "rarity_weight": 0.75},
-  {"id": "star", "display_name": "Star", "size_class": "small", "mass": 0.6, "friction": 0.75, "bounce": 0.35, "roll_factor": 0.2, "rarity_weight": 0.45},
-  {"id": "ring", "display_name": "Ring", "size_class": "small", "mass": 0.7, "friction": 0.4, "bounce": 0.45, "roll_factor": 1.1, "rarity_weight": 0.55},
-  {"id": "duck", "display_name": "Duck", "size_class": "small", "mass": 0.5, "friction": 0.65, "bounce": 0.6, "roll_factor": 0.2, "rarity_weight": 0.35},
-  {"id": "mug", "display_name": "Mug", "size_class": "medium", "mass": 1.2, "friction": 0.9, "bounce": 0.15, "roll_factor": 0.25, "rarity_weight": 0.45},
-  {"id": "can", "display_name": "Can", "size_class": "small", "mass": 0.7, "friction": 0.45, "bounce": 0.35, "roll_factor": 1.0, "rarity_weight": 0.7},
-  {"id": "toy_block", "display_name": "Toy Block", "size_class": "medium", "mass": 1.0, "friction": 0.8, "bounce": 0.3, "roll_factor": 0.1, "rarity_weight": 0.9}
+  {"id": "cube", "display_name": "Cube", "size_class": "medium", "mass": 1.0, "friction": 0.8, "bounce": 0.25, "roll_factor": 0.1, "rarity_weight": 1.0, "rest_mode": "face"},
+  {"id": "sphere", "display_name": "Sphere", "size_class": "medium", "mass": 0.8, "friction": 0.35, "bounce": 0.55, "roll_factor": 1.2, "rarity_weight": 1.0, "rest_mode": "any"},
+  {"id": "cylinder", "display_name": "Cylinder", "size_class": "medium", "mass": 1.1, "friction": 0.6, "bounce": 0.3, "roll_factor": 0.8, "rarity_weight": 1.0, "rest_mode": "side_or_upright"},
+  {"id": "cone", "display_name": "Cone", "size_class": "medium", "mass": 0.9, "friction": 0.7, "bounce": 0.25, "roll_factor": 0.45, "rarity_weight": 0.9, "rest_mode": "upright"},
+  {"id": "capsule", "display_name": "Capsule", "size_class": "medium", "mass": 0.9, "friction": 0.45, "bounce": 0.45, "roll_factor": 1.0, "rarity_weight": 0.9, "rest_mode": "side"},
+  {"id": "pyramid", "display_name": "Pyramid", "size_class": "medium", "mass": 1.0, "friction": 0.85, "bounce": 0.2, "roll_factor": 0.05, "rarity_weight": 0.75, "rest_mode": "upright"},
+  {"id": "star", "display_name": "Star", "size_class": "small", "mass": 0.6, "friction": 0.75, "bounce": 0.35, "roll_factor": 0.2, "rarity_weight": 0.45, "rest_mode": "flat"},
+  {"id": "ring", "display_name": "Ring", "size_class": "small", "mass": 0.7, "friction": 0.4, "bounce": 0.45, "roll_factor": 1.1, "rarity_weight": 0.55, "rest_mode": "flat"},
+  {"id": "duck", "display_name": "Duck", "size_class": "small", "mass": 0.5, "friction": 0.65, "bounce": 0.6, "roll_factor": 0.2, "rarity_weight": 0.35, "rest_mode": "upright"},
+  {"id": "mug", "display_name": "Mug", "size_class": "medium", "mass": 1.2, "friction": 0.9, "bounce": 0.15, "roll_factor": 0.25, "rarity_weight": 0.45, "rest_mode": "upright"},
+  {"id": "can", "display_name": "Can", "size_class": "small", "mass": 0.7, "friction": 0.45, "bounce": 0.35, "roll_factor": 1.0, "rarity_weight": 0.7, "rest_mode": "side_or_upright"},
+  {"id": "toy_block", "display_name": "Toy Block", "size_class": "medium", "mass": 1.0, "friction": 0.8, "bounce": 0.3, "roll_factor": 0.1, "rarity_weight": 0.9, "rest_mode": "face"},
+  {"id": "book", "display_name": "Book", "size_class": "medium", "mass": 1.1, "friction": 0.9, "bounce": 0.1, "roll_factor": 0.05, "rarity_weight": 0.6, "rest_mode": "flat"},
+  {"id": "bottle", "display_name": "Bottle", "size_class": "medium", "mass": 0.8, "friction": 0.5, "bounce": 0.3, "roll_factor": 0.7, "rarity_weight": 0.6, "rest_mode": "side_or_upright"},
+  {"id": "donut", "display_name": "Donut", "size_class": "small", "mass": 0.5, "friction": 0.6, "bounce": 0.4, "roll_factor": 0.9, "rarity_weight": 0.5, "rest_mode": "flat"},
+  {"id": "gem", "display_name": "Gem", "size_class": "small", "mass": 0.9, "friction": 0.7, "bounce": 0.35, "roll_factor": 0.3, "rarity_weight": 0.4, "rest_mode": "upright"}
 ]
-

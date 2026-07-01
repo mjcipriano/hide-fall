@@ -7,6 +7,9 @@ const NetworkMessageValidatorScript := preload("res://scripts/shared/networking/
 const QrCodeScript := preload("res://scripts/shared/qr/qr_code.gd")
 const ScoreCalculatorScript := preload("res://scripts/shared/scoring/score_calculator.gd")
 const WebSocketLanHostScript := preload("res://scripts/shared/networking/websocket_lan_host.gd")
+const LanGameAnnouncerScript := preload("res://scripts/shared/networking/lan_game_announcer.gd")
+const LanGameBrowserScript := preload("res://scripts/shared/networking/lan_game_browser.gd")
+const PropFactoryScript := preload("res://scripts/shared/props/prop_factory.gd")
 
 var failures := 0
 
@@ -41,7 +44,14 @@ func _run() -> void:
 	_test_object_collisions()
 	_test_dropped_object_gravity()
 	_test_prop_stacking()
+	_test_edge_slide_off()
 	_test_orientation_settle()
+	_test_rest_modes()
+	_test_thrown_prop_tumbles()
+	_test_shot_cooldown()
+	_test_hider_preferences()
+	_test_prop_factory()
+	_test_lan_discovery()
 	_test_scoring_rules()
 	await _test_host_scene_smoke()
 	await _test_mobile_scene_smoke()
@@ -72,8 +82,14 @@ func _test_content_loads() -> void:
 	_assert(int(config.get_value("objects", "decoy_count", 0)) == 75, "default decoy count loads")
 	_assert(int(config.get_value("round", "room_setup_seconds", 0)) == 5, "room setup duration loads")
 	_assert(bool(config.get_value("seeker", "scan_pulse_enabled", false)), "scan pulse is enabled in default config")
-	_assert(content.get_shape_ids().size() >= 12, "MVP shape set loads")
+	_assert(float(config.get_value("seeker", "shot_cooldown_seconds", 0.0)) > 0.0, "shot cooldown is configured")
+	_assert(int(config.get_value("network", "discovery_port", 0)) == 29445, "discovery port is configured")
+	_assert(content.get_shape_ids().size() >= 16, "expanded shape set loads")
 	_assert(content.get_color_ids().size() >= 12, "MVP color set loads")
+	_assert(content.get_pattern_ids().size() >= 5, "pattern set loads")
+	_assert(content.get_pattern_ids().has("solid"), "solid pattern exists")
+	_assert(content.get_shape_rest_mode("sphere") == "any", "sphere rest mode loads")
+	_assert(content.get_shape_rest_mode("ring") == "flat", "ring rest mode loads")
 
 
 func _test_project_xr_startup_settings() -> void:
@@ -300,6 +316,8 @@ func _test_orientation_settle() -> void:
 	sim.objects = {decoy: sim.objects[decoy]}
 	sim.objects[decoy]["position"] = Vector3(0.0, 0.15, 0.0)
 	sim.objects[decoy]["velocity"] = Vector3.ZERO
+	sim.objects[decoy]["spin_speed"] = 0.0
+	sim.objects[decoy]["rest_mode"] = "face"
 	sim.objects[decoy]["orientation"] = Quaternion(Vector3.RIGHT, 0.9)
 	for _frame in 120:
 		sim._integrate_free_decoys(0.033)
@@ -308,6 +326,176 @@ func _test_orientation_settle() -> void:
 	var local_up := settled.inverse() * Vector3.UP
 	var axis_alignment := maxf(maxf(absf(local_up.x), absf(local_up.y)), absf(local_up.z))
 	_assert(axis_alignment > 0.999, "dropped prop topples to rest flat on a face")
+	# Yaw survives settling: a cube set down twisted 30 degrees stays twisted.
+	sim.objects[decoy]["orientation"] = Quaternion(Vector3.UP, 0.5) * Quaternion(Vector3.RIGHT, 0.3)
+	sim.objects[decoy]["topple_speed"] = 0.0
+	for _frame in 120:
+		sim._integrate_free_decoys(0.033)
+	var yawed: Quaternion = sim.objects[decoy]["orientation"]
+	var forward := yawed * Vector3.FORWARD
+	_assert(absf((yawed * Vector3.UP).y - 1.0) < 0.001, "twisted cube still rests flat")
+	_assert(absf(atan2(-forward.x, -forward.z) - 0.5) < 0.05, "twist (yaw) is preserved when settling")
+
+
+func _test_rest_modes() -> void:
+	var sim = _new_sim(601)
+	sim.add_hider("Solo", false)
+	sim.start_round()
+	var ids := sim.get_decoy_object_ids()
+	sim.objects = {ids[0]: sim.objects[ids[0]], ids[1]: sim.objects[ids[1]], ids[2]: sim.objects[ids[2]]}
+	var positions := [Vector3(-2.0, 0.15, 0.0), Vector3(0.0, 0.15, 0.0), Vector3(2.0, 0.15, 0.0)]
+	for index in 3:
+		var obj_id: String = ids[index]
+		sim.objects[obj_id]["position"] = positions[index]
+		sim.objects[obj_id]["velocity"] = Vector3.ZERO
+		sim.objects[obj_id]["spin_speed"] = 0.0
+	# A cylinder knocked far over rolls onto its side, not back upright.
+	sim.objects[ids[0]]["rest_mode"] = "side_or_upright"
+	sim.objects[ids[0]]["orientation"] = Quaternion(Vector3.RIGHT, 1.2)
+	# A sphere rests exactly as placed.
+	var sphere_orientation := Quaternion(Vector3(0.3, 0.8, 0.5).normalized(), 1.1)
+	sim.objects[ids[1]]["rest_mode"] = "any"
+	sim.objects[ids[1]]["orientation"] = sphere_orientation
+	# A tipped cone stands back up.
+	sim.objects[ids[2]]["rest_mode"] = "upright"
+	sim.objects[ids[2]]["orientation"] = Quaternion(Vector3.RIGHT, 0.6)
+	for _frame in 150:
+		sim._integrate_free_decoys(0.033)
+	var cylinder_up: Vector3 = (sim.objects[ids[0]]["orientation"] as Quaternion) * Vector3.UP
+	_assert(absf(cylinder_up.y) < 0.05, "tipped cylinder settles onto its side")
+	var sphere_after: Quaternion = sim.objects[ids[1]]["orientation"]
+	_assert(sphere_after.angle_to(sphere_orientation) < 0.01, "sphere keeps the orientation it was placed in")
+	var cone_up: Vector3 = (sim.objects[ids[2]]["orientation"] as Quaternion) * Vector3.UP
+	_assert(cone_up.y > 0.999, "tipped cone settles back upright")
+
+
+func _test_thrown_prop_tumbles() -> void:
+	var sim = _new_sim(602)
+	sim.add_hider("Solo", false)
+	sim.start_round()
+	var decoy: String = sim.get_decoy_object_ids()[0]
+	sim.objects = {decoy: sim.objects[decoy]}
+	sim.set_object_held(decoy, true)
+	sim.move_held_object(decoy, Vector3(0.0, 1.4, 0.0))
+	var before: Quaternion = sim.objects[decoy]["orientation"]
+	sim.release_object(decoy, Vector3(2.5, 0.5, 0.0))
+	_assert(float(sim.objects[decoy]["spin_speed"]) > 0.5, "thrown prop receives tumble spin")
+	sim._integrate_free_decoys(0.033)
+	sim._integrate_free_decoys(0.033)
+	var during: Quaternion = sim.objects[decoy]["orientation"]
+	_assert(before.angle_to(during) > 0.05, "thrown prop tumbles while airborne")
+
+
+func _test_edge_slide_off() -> void:
+	var sim = _new_sim(603)
+	sim.add_hider("Solo", false)
+	sim.start_round()
+	var ids := sim.get_decoy_object_ids()
+	var base_id: String = ids[0]
+	var top_id: String = ids[1]
+	sim.objects = {base_id: sim.objects[base_id], top_id: sim.objects[top_id]}
+	for prop_id in [base_id, top_id]:
+		sim.objects[prop_id]["shape"] = "cube"
+		sim.objects[prop_id]["rest_mode"] = "face"
+		sim.objects[prop_id]["collision_radius"] = 0.19
+		sim.objects[prop_id]["half_height"] = 0.14
+		sim.objects[prop_id]["velocity"] = Vector3.ZERO
+		sim.objects[prop_id]["spin_speed"] = 0.0
+	sim.objects[base_id]["position"] = Vector3(0.0, 0.15, 0.0)
+	# Dropped overlapping the base cube's rim, not squarely on top of it.
+	sim.objects[top_id]["position"] = Vector3(0.30, 0.7, 0.0)
+	for _frame in 180:
+		sim._integrate_free_decoys(0.033)
+	var base_pos: Vector3 = sim.objects[base_id]["position"]
+	var top_pos: Vector3 = sim.objects[top_id]["position"]
+	_assert(top_pos.y < 0.2, "rim-dropped prop slides off and lands on the floor")
+	var footprint := Vector2(top_pos.x - base_pos.x, top_pos.z - base_pos.z).length()
+	_assert(footprint > 0.3, "rim-dropped prop ends up clear of the base prop")
+
+
+func _test_shot_cooldown() -> void:
+	var sim = _new_sim(604)
+	sim.add_bot_hiders(2)
+	sim.start_round()
+	sim.confirm_room_setup()
+	_advance_for(sim, 20.4)
+	var decoys := sim.get_decoy_object_ids()
+	var first := sim.shoot_object(decoys[0])
+	_assert(first.get("accepted", false), "first shot fires")
+	var second := sim.shoot_object(decoys[1])
+	_assert(not second.get("accepted", true), "immediate second shot is blocked")
+	_assert(second.get("reason", "") == "shot_cooldown", "second shot is blocked by the gun cooldown")
+	_advance_for(sim, float(sim.config.get_value("seeker", "shot_cooldown_seconds", 2.5)) + 0.2)
+	var third := sim.shoot_object(decoys[1])
+	_assert(third.get("accepted", false), "shot fires again after the cooldown elapses")
+	_assert(sim.get_state_snapshot().has("shot_cooldown_remaining"), "snapshot exposes the gun cooldown")
+
+
+func _test_hider_preferences() -> void:
+	var sim = _new_sim(605)
+	var player_id := sim.add_hider("Chooser")
+	sim.set_player_preferences(player_id, {"shape": "duck", "color": "purple", "pattern": "stripes"})
+	sim.set_player_preferences(player_id, {"shape": "not_a_shape"})
+	sim.start_round()
+	var object_id: String = sim.players[player_id]["object_id"]
+	_assert(sim.objects[object_id]["shape"] == "duck", "preferred shape is used at spawn")
+	_assert(sim.objects[object_id]["color"] == "purple", "preferred color is used at spawn")
+	_assert(sim.objects[object_id]["pattern"] == "stripes", "preferred pattern is used at spawn")
+	_assert(sim.objects[object_id]["rest_mode"] == "upright", "spawned prop carries its shape rest mode")
+
+
+func _test_prop_factory() -> void:
+	var content = ContentDatabaseScript.new()
+	content.load_default()
+	for shape_id in content.get_shape_ids():
+		var prop: Node3D = PropFactoryScript.make_prop(shape_id)
+		var mesh_parts := 0
+		for child in prop.get_children():
+			if child is MeshInstance3D:
+				mesh_parts += 1
+		_assert(mesh_parts >= 1, "prop factory builds mesh for shape %s" % shape_id)
+		PropFactoryScript.apply_material(prop, PropFactoryScript.make_material(Color.RED, "solid"))
+		prop.free()
+	var striped := PropFactoryScript.make_material(Color.BLUE, "stripes")
+	_assert(striped.albedo_texture != null, "striped material carries a pattern texture")
+	var metallic := PropFactoryScript.make_material(Color.WHITE, "metallic")
+	_assert(metallic.metallic > 0.5, "metallic pattern sets metalness")
+	var glow := PropFactoryScript.make_material(Color.GREEN, "glow")
+	_assert(glow.emission_enabled, "glow pattern enables emission")
+	_assert(PropFactoryScript.pattern_texture("dots") == PropFactoryScript.pattern_texture("dots"), "pattern textures are cached")
+
+
+func _test_lan_discovery() -> void:
+	var info := {
+		"host_name": "Test Room",
+		"host_ip": "192.168.1.50",
+		"port": 29444,
+		"room_id": "842913",
+		"token": "hidefall",
+		"phase": "lobby",
+		"players": 2
+	}
+	var beacon := LanGameAnnouncerScript.build_beacon(info)
+	var parsed := LanGameBrowserScript.parse_beacon(beacon, "192.168.1.50")
+	_assert(not parsed.is_empty(), "beacon parses back")
+	_assert(parsed.get("room_id", "") == "842913", "beacon carries room id")
+	_assert(parsed.get("host_ip", "") == "192.168.1.50", "beacon host ip comes from the sender address")
+	_assert(LanGameBrowserScript.parse_beacon("{\"game\":\"other\"}").is_empty(), "foreign beacons are rejected")
+	_assert(LanGameBrowserScript.parse_beacon("not json").is_empty(), "garbage beacons are rejected")
+	# Best-effort live loopback check; skipped when the sandbox blocks UDP.
+	var browser = LanGameBrowserScript.new()
+	var bind_error: Error = browser.udp.bind(38455)
+	if bind_error == OK:
+		var sender := PacketPeerUDP.new()
+		sender.set_dest_address("127.0.0.1", 38455)
+		sender.put_packet(beacon.to_utf8_buffer())
+		OS.delay_msec(50)
+		var received: bool = browser.udp.get_available_packet_count() > 0
+		_assert(received, "loopback beacon is received over UDP")
+		browser.udp.close()
+	else:
+		print("SKIP: UDP loopback unavailable in this environment")
+	browser.free()
 
 
 func _test_scoring_rules() -> void:
@@ -350,13 +538,20 @@ func _test_host_scene_smoke() -> void:
 		"version": 1,
 		"room_id": "842913",
 		"token": "hidefall",
-		"player_name": "Remote"
+		"player_name": "Remote",
+		"preferred_shape": "duck",
+		"preferred_color": "purple",
+		"preferred_pattern": "stripes"
 	})
 	_assert(scene.peer_to_player.has(7), "host accepts valid mobile join")
 	_assert(fake_host.sent[0]["message"]["type"] == "join_accepted", "host sends join acceptance")
+	_assert(fake_host.sent[0]["message"].has("patterns"), "join acceptance lists available patterns")
 	_assert(not scene.simulation.can_start_round(), "joined mobile hider must ready before round start")
+	_assert(scene.simulation.players[scene.peer_to_player[7]]["preferred_shape"] == "duck", "host stores pre-join disguise preference")
 	scene.simulation.set_player_ready(scene.peer_to_player[7], true)
 	scene.simulation.start_round()
+	var remote_object_id: String = scene.simulation.players[scene.peer_to_player[7]]["object_id"]
+	_assert(scene.simulation.objects[remote_object_id]["shape"] == "duck", "remote hider spawns with chosen shape")
 	scene.simulation.confirm_room_setup()
 	_advance_for(scene.simulation, 20.4)
 	scene._handle_join_request(8, {
@@ -395,6 +590,16 @@ func _test_mobile_scene_smoke() -> void:
 	_assert(scene.get_script() != null, "mobile hider script loads")
 	root.add_child(scene)
 	await process_frame
+	# Pre-join disguise selection flows into the join request.
+	scene.selected_shape_index = scene.available_shapes.find("duck")
+	scene.selected_color_index = scene.available_colors.find("purple")
+	scene.selected_pattern_index = scene.available_patterns.find("stripes")
+	scene._refresh_selection_ui()
+	var join_request: Dictionary = scene.build_join_request()
+	_assert(NetworkMessageValidatorScript.validate_client_message(join_request).is_empty(), "mobile join request validates")
+	_assert(join_request["preferred_shape"] == "duck", "join request carries chosen shape")
+	_assert(join_request["preferred_color"] == "purple", "join request carries chosen color")
+	_assert(join_request["preferred_pattern"] == "stripes", "join request carries chosen pattern")
 	scene._on_message_received({
 		"type": "join_accepted",
 		"version": 1,
@@ -402,11 +607,15 @@ func _test_mobile_scene_smoke() -> void:
 		"room_id": "842913",
 		"spectator": false,
 		"shapes": ["cube", "sphere"],
-		"colors": ["red", "blue"]
+		"colors": ["red", "blue"],
+		"patterns": ["solid", "dots"]
 	})
+	_assert(scene.game_panel.visible and not scene.menu_panel.visible, "joining switches to the in-game screen")
 	scene._on_ready_pressed()
 	_assert(scene.player_ready, "mobile ready button toggles ready")
 	scene.player_id = "p1"
+	scene.selected_color_index = 0
+	scene.selected_shape_index = 0
 	scene._request_next_color()
 	scene._request_next_shape()
 	var input: Dictionary = scene.build_hider_input()
@@ -420,12 +629,25 @@ func _test_mobile_scene_smoke() -> void:
 		"phase": "seek",
 		"time_remaining": 80.0,
 		"shots_remaining": 4,
+		"shot_cooldown_remaining": 1.2,
 		"danger": "watched",
 		"cooldowns": {"shape": 3.0, "color": 1.0},
-		"hider_state": {"player_id": "p1", "object_id": "obj_001", "alive": true, "shape": "sphere", "color": "blue", "position": [0.0, 0.15, 0.0]},
-		"objects": [{"object_id": "obj_001", "shape": "sphere", "color": "blue", "position": [0.0, 0.15, 0.0], "velocity": [0.0, 0.0, 0.0], "is_hider": true, "alive": true}]
+		"seeker": {"position": [1.0, 1.6, 1.0], "forward": [0.0, 0.0, -1.0]},
+		"hider_state": {"player_id": "p1", "object_id": "obj_001", "alive": true, "shape": "sphere", "color": "blue", "pattern": "dots", "position": [0.0, 0.15, 0.0]},
+		"objects": [
+			{"object_id": "obj_001", "shape": "sphere", "color": "blue", "pattern": "dots", "position": [0.0, 0.15, 0.0], "orientation": [0.0, 0.0, 0.0, 1.0], "velocity": [0.0, 0.0, 0.0], "is_hider": true, "alive": true},
+			{"object_id": "obj_002", "shape": "mug", "color": "red", "pattern": "stripes", "position": [1.0, 0.15, 0.5], "orientation": [0.0, 0.0, 0.0, 1.0], "velocity": [0.0, 0.0, 0.0], "is_hider": false, "alive": true}
+		]
 	})
 	_assert(scene.current_phase == "seek" and scene.danger == "watched", "mobile scene applies state snapshots")
+	_assert(scene.world_props.size() == 2, "mobile scene mirrors snapshot objects into the 3D world")
+	_assert(scene.seeker_avatar.visible, "mobile scene shows the seeker avatar during a round")
+	# Camera-relative movement converts joystick pushes into world axes.
+	scene.cam_yaw = 0.0
+	scene.move_vector = Vector2(0.0, -1.0)
+	var forward_input: Dictionary = scene.build_hider_input()
+	_assert(absf(float(forward_input["move"][0])) < 0.01 and float(forward_input["move"][1]) < -0.9, "joystick up moves away from the camera")
+	scene.move_vector = Vector2.ZERO
 	root.remove_child(scene)
 	scene.free()
 	await process_frame

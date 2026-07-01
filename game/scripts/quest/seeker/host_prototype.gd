@@ -6,13 +6,16 @@ const HidefallSimulationScript := preload("res://scripts/shared/game_state/hidef
 const NetworkMessageValidatorScript := preload("res://scripts/shared/networking/network_message_validator.gd")
 const QrCodeScript := preload("res://scripts/shared/qr/qr_code.gd")
 const WebSocketLanHostScript := preload("res://scripts/shared/networking/websocket_lan_host.gd")
+const LanGameAnnouncerScript := preload("res://scripts/shared/networking/lan_game_announcer.gd")
+const PropFactoryScript := preload("res://scripts/shared/props/prop_factory.gd")
 
 var simulation
 var content
 var config
 var network_host
+var announcer
 var object_nodes: Dictionary = {}
-var object_materials: Dictionary = {}
+var object_looks: Dictionary = {}
 var peer_to_player: Dictionary = {}
 var local_hider_id := ""
 var selected_color_index := 0
@@ -50,7 +53,7 @@ var crosshair: ColorRect
 var xr_hud_root: Node3D
 var xr_hud_label: Label3D
 var xr_help_label: Label3D
-var xr_qr_sprite: Sprite3D
+var xr_join_label: Label3D
 var xr_crosshair: MeshInstance3D
 var xr_phase_label: Label3D
 var xr_blackout_panel: MeshInstance3D
@@ -103,6 +106,8 @@ func _process(delta: float) -> void:
 func _exit_tree() -> void:
 	if network_host != null:
 		network_host.stop()
+	if announcer != null:
+		announcer.stop()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -309,21 +314,18 @@ func _build_xr_hud() -> void:
 	xr_help_label.text = "Trigger shoot   Hold grip grab & turn   Release drop   A start / scan"
 	xr_hud_root.add_child(xr_help_label)
 
-	var qr_label := Label3D.new()
-	qr_label.name = "JoinQrLabel"
-	qr_label.font_size = 18
-	qr_label.outline_size = 5
-	qr_label.pixel_size = 0.0018
-	qr_label.position = Vector3(1.06, 0.24, 0.0)
-	qr_label.modulate = Color(0.85, 0.95, 1.0, 1.0)
-	qr_label.text = "Scan to join"
-	xr_hud_root.add_child(qr_label)
-
-	xr_qr_sprite = Sprite3D.new()
-	xr_qr_sprite.name = "JoinQr"
-	xr_qr_sprite.pixel_size = 0.0016
-	xr_qr_sprite.position = Vector3(1.06, 0.0, 0.0)
-	xr_hud_root.add_child(xr_qr_sprite)
+	# A QR code inside the headset cannot be scanned by a phone, so the XR HUD
+	# shows join info instead; phones discover the game over Wi-Fi automatically.
+	xr_join_label = Label3D.new()
+	xr_join_label.name = "JoinInfo"
+	xr_join_label.font_size = 18
+	xr_join_label.outline_size = 5
+	xr_join_label.pixel_size = 0.0018
+	xr_join_label.width = 620.0
+	xr_join_label.position = Vector3(1.02, 0.06, 0.0)
+	xr_join_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	xr_join_label.modulate = Color(0.85, 0.95, 1.0, 1.0)
+	xr_hud_root.add_child(xr_join_label)
 
 	xr_blackout_panel = MeshInstance3D.new()
 	xr_blackout_panel.name = "BlackoutPanel"
@@ -415,21 +417,44 @@ func _rebuild_objects() -> void:
 	for child in object_root.get_children():
 		child.queue_free()
 	object_nodes.clear()
-	object_materials.clear()
+	object_looks.clear()
 	for object_id in simulation.objects:
-		var obj: Dictionary = simulation.objects[object_id]
-		var node := MeshInstance3D.new()
-		node.name = object_id
-		node.mesh = _mesh_for_shape(obj["shape"])
-		var material := StandardMaterial3D.new()
-		material.albedo_color = Color(content.get_color_hex(obj["color"]))
-		material.roughness = 0.72
-		material.metallic = 0.0
-		node.material_override = material
-		object_root.add_child(node)
-		object_nodes[object_id] = node
-		object_materials[object_id] = material
+		_create_object_node(object_id)
 	_update_objects()
+
+
+func _create_object_node(object_id: String) -> void:
+	var obj: Dictionary = simulation.objects[object_id]
+	var node: Node3D = PropFactoryScript.make_prop(obj["shape"])
+	node.name = object_id
+	node.set_meta("shape", String(obj["shape"]))
+	object_root.add_child(node)
+	object_nodes[object_id] = node
+	_apply_object_look(object_id, obj)
+
+
+# Rebuilds/retints a prop's visual only when its disguise actually changed.
+func _apply_object_look(object_id: String, obj: Dictionary) -> void:
+	var look := "%s|%s|%s|%s" % [obj["shape"], obj["color"], obj.get("pattern", "solid"), str(obj.get("damaged", false))]
+	if object_looks.get(object_id, "") == look:
+		return
+	object_looks[object_id] = look
+	var node: Node3D = object_nodes[object_id]
+	var previous_shape: String = String(node.get_meta("shape", ""))
+	if previous_shape != String(obj["shape"]):
+		var replacement: Node3D = PropFactoryScript.make_prop(obj["shape"])
+		replacement.name = object_id
+		replacement.transform = node.transform
+		object_root.remove_child(node)
+		node.queue_free()
+		object_root.add_child(replacement)
+		object_nodes[object_id] = replacement
+		node = replacement
+	node.set_meta("shape", String(obj["shape"]))
+	var color := Color(content.get_color_hex(obj["color"]))
+	if obj.get("damaged", false):
+		color = color.darkened(0.45)
+	PropFactoryScript.apply_material(node, PropFactoryScript.make_material(color, obj.get("pattern", "solid")))
 
 
 func _update_objects() -> void:
@@ -440,15 +465,11 @@ func _update_objects() -> void:
 		if object_id == held_object_id:
 			continue
 		var obj: Dictionary = simulation.objects[object_id]
-		var node: MeshInstance3D = object_nodes[object_id]
+		_apply_object_look(object_id, obj)
+		var node: Node3D = object_nodes[object_id]
 		node.position = obj["position"]
 		node.quaternion = obj.get("orientation", Quaternion(Vector3.UP, float(obj.get("rotation_y", 0.0))))
 		node.visible = obj.get("alive", true) or not obj.get("is_hider", false)
-		var material: StandardMaterial3D = object_materials[object_id]
-		material.albedo_color = Color(content.get_color_hex(obj["color"]))
-		if obj.get("damaged", false):
-			material.albedo_color = material.albedo_color.darkened(0.45)
-		node.mesh = _mesh_for_shape(obj["shape"])
 
 
 func _update_hud() -> void:
@@ -484,12 +505,17 @@ func _update_hud() -> void:
 	if hud_label != null:
 		hud_label.text = status_text
 	if xr_hud_label != null:
-		xr_hud_label.text = "Time %.0fs   Shots %d   Scans %d   Live props %d   In room %d" % [
+		var gun_text := "READY"
+		if simulation.shots_remaining <= 0:
+			gun_text = "EMPTY"
+		elif simulation.shot_cooldown_remaining > 0.0:
+			gun_text = "COOLING %.1fs" % simulation.shot_cooldown_remaining
+		xr_hud_label.text = "Time %.0fs   Shots %d   Gun %s   Scans %d   Live props %d" % [
 			float(snapshot["time_remaining"]),
 			int(snapshot["shots_remaining"]),
+			gun_text,
 			int(snapshot.get("scan_pulses_remaining", 0)),
-			_live_hider_count(),
-			simulation.objects.size()
+			_live_hider_count()
 		]
 	if xr_phase_label != null:
 		xr_phase_label.text = _phase_instruction_text()
@@ -523,8 +549,13 @@ func _update_join_qr(join_payload: String) -> void:
 	var texture := QrCodeScript.make_texture(join_payload, 5)
 	if qr_texture_rect != null:
 		qr_texture_rect.texture = texture
-	if xr_qr_sprite != null:
-		xr_qr_sprite.texture = texture
+	if xr_join_label != null:
+		xr_join_label.text = "JOIN FROM YOUR PHONE\nOpen Hidefall - this room appears\nautomatically on your Wi-Fi.\nManual: %s:%d\nRoom %s   Code %s" % [
+			host_ip,
+			int(config.get_value("network", "port", 29444)),
+			simulation.room_id,
+			simulation.room_token
+		]
 
 
 func _shoot_at_cursor() -> void:
@@ -532,7 +563,9 @@ func _shoot_at_cursor() -> void:
 		return
 	if simulation.phase != HidefallSimulationScript.PHASE_SEEK:
 		return
-	if simulation.shots_remaining <= 0:
+	var gate: Dictionary = simulation.can_fire()
+	if not gate.get("accepted", false):
+		# Out of ammo or the gun is still cooling down: dry click, no beam.
 		_play_sfx("empty")
 		_flash_crosshair(Color(0.6, 0.6, 0.6, 1.0))
 		return
@@ -553,6 +586,10 @@ func _shoot_at_cursor() -> void:
 				beam_color = Color(1.0, 0.85, 0.25)
 				_flash_crosshair(Color(1.0, 0.25, 0.2, 1.0))
 				_play_sfx("miss")
+	else:
+		# A wild shot into the room still heats the gun, so hiders get their
+		# escape window even when the seeker misses everything.
+		simulation.begin_shot_cooldown()
 	_spawn_laser(ray["origin"], endpoint, beam_color)
 
 
@@ -608,7 +645,7 @@ func _begin_grab() -> void:
 	# Preserve where on the prop the hand grabbed it (edge grab) plus its
 	# orientation, so it holds and turns naturally instead of snapping to center.
 	var source := _grab_source()
-	var node: MeshInstance3D = object_nodes.get(object_id)
+	var node: Node3D = object_nodes.get(object_id)
 	var raw := Transform3D(Basis(), Vector3(0.0, 0.0, -0.25))
 	if source != null and node != null:
 		raw = source.global_transform.affine_inverse() * node.global_transform
@@ -648,7 +685,7 @@ func _update_held_object(delta: float) -> void:
 	if held_object_id.is_empty():
 		return
 	var source := _grab_source()
-	var node: MeshInstance3D = object_nodes.get(held_object_id)
+	var node: Node3D = object_nodes.get(held_object_id)
 	if source == null or node == null:
 		return
 	# Reproduce the grab pose relative to the hand: preserves the edge offset and
@@ -855,48 +892,6 @@ func _log_visible_gameplay_state() -> void:
 		launch_gameplay_logged = true
 
 
-func _mesh_for_shape(shape_id: String) -> Mesh:
-	match shape_id:
-		"sphere", "duck":
-			var mesh := SphereMesh.new()
-			mesh.radius = 0.16
-			mesh.height = 0.32
-			return mesh
-		"cylinder", "can", "mug":
-			var mesh := CylinderMesh.new()
-			mesh.top_radius = 0.14
-			mesh.bottom_radius = 0.14
-			mesh.height = 0.32
-			mesh.radial_segments = 24
-			return mesh
-		"cone":
-			var mesh := CylinderMesh.new()
-			mesh.top_radius = 0.02
-			mesh.bottom_radius = 0.18
-			mesh.height = 0.34
-			mesh.radial_segments = 24
-			return mesh
-		"capsule":
-			var mesh := CapsuleMesh.new()
-			mesh.radius = 0.13
-			mesh.height = 0.36
-			return mesh
-		"pyramid", "star":
-			var mesh := PrismMesh.new()
-			mesh.size = Vector3(0.34, 0.28, 0.34)
-			return mesh
-		"ring":
-			var mesh := TorusMesh.new()
-			mesh.inner_radius = 0.10
-			mesh.outer_radius = 0.17
-			mesh.ring_segments = 24
-			return mesh
-		_:
-			var mesh := BoxMesh.new()
-			mesh.size = Vector3(0.28, 0.28, 0.28)
-			return mesh
-
-
 func _live_hider_count() -> int:
 	var count := 0
 	for object_id in simulation.objects:
@@ -1041,6 +1036,41 @@ func _start_network_host() -> void:
 	var port := int(config.get_value("network", "port", 29444))
 	var error: Error = network_host.start(port)
 	network_status = "listening" if error == OK else "error %d" % int(error)
+	_start_announcer(port)
+
+
+# UDP beacon so phones list this game without typing anything.
+func _start_announcer(port: int) -> void:
+	announcer = LanGameAnnouncerScript.new()
+	announcer.name = "LanGameAnnouncer"
+	add_child(announcer)
+	_refresh_announcer_info(port)
+	var error: Error = announcer.start(
+		int(config.get_value("network", "discovery_port", 29445)),
+		float(config.get_value("network", "discovery_interval_seconds", 1.0))
+	)
+	print("Hidefall LAN announcer %s on udp/%d" % [
+		"broadcasting" if error == OK else "failed (%d)" % error,
+		int(config.get_value("network", "discovery_port", 29445))
+	])
+
+
+func _refresh_announcer_info(port: int) -> void:
+	if announcer == null:
+		return
+	var host_name := "Hidefall Quest Room"
+	if not OS.get_environment("USER").is_empty():
+		host_name = "%s's Quest Room" % OS.get_environment("USER")
+	announcer.set_info({
+		"host_name": host_name,
+		"host_ip": host_ip,
+		"port": port,
+		"room_id": simulation.room_id,
+		"token": simulation.room_token,
+		"phase": simulation.phase,
+		"players": simulation.players.size(),
+		"protocol_version": NetworkMessageValidatorScript.PROTOCOL_VERSION
+	})
 
 
 func _on_network_client_connected(peer_id: int) -> void:
@@ -1094,6 +1124,11 @@ func _handle_join_request(peer_id: int, message: Dictionary) -> void:
 	var player_id: String = simulation.add_spectator(player_name) if late_spectator else simulation.add_hider(player_name, false)
 	if not late_spectator:
 		simulation.set_player_ready(player_id, false)
+	simulation.set_player_preferences(player_id, {
+		"shape": String(message.get("preferred_shape", "") if message.get("preferred_shape", null) != null else ""),
+		"color": String(message.get("preferred_color", "") if message.get("preferred_color", null) != null else ""),
+		"pattern": String(message.get("preferred_pattern", "") if message.get("preferred_pattern", null) != null else "")
+	})
 	peer_to_player[peer_id] = player_id
 	network_host.send_to_peer(peer_id, {
 		"type": "join_accepted",
@@ -1103,7 +1138,8 @@ func _handle_join_request(peer_id: int, message: Dictionary) -> void:
 		"spectator": late_spectator,
 		"settings": config.duplicate_data(),
 		"shapes": content.get_shape_ids(),
-		"colors": content.get_color_ids()
+		"colors": content.get_color_ids(),
+		"patterns": content.get_pattern_ids()
 	})
 	network_host.send_to_peer(peer_id, simulation.get_state_snapshot(player_id))
 
@@ -1118,6 +1154,7 @@ func _send_periodic_snapshots(delta: float) -> void:
 	for peer_id in peer_to_player:
 		var player_id: String = peer_to_player[peer_id]
 		network_host.send_to_peer(peer_id, simulation.get_state_snapshot(player_id))
+	_refresh_announcer_info(int(config.get_value("network", "port", 29444)))
 
 
 func _build_lobby_snapshot() -> Dictionary:

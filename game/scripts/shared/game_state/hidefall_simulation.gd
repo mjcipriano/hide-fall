@@ -19,6 +19,7 @@ var phase := PHASE_LOBBY
 var phase_elapsed := 0.0
 var server_tick := 0
 var shots_remaining := 0
+var shot_cooldown_remaining := 0.0
 var scan_pulses_remaining := 0
 var room_id := "842913"
 var room_token := "hidefall"
@@ -35,6 +36,7 @@ var _next_player_index := 1
 var _next_object_index := 1
 var _shape_ids: Array[String] = []
 var _color_ids: Array[String] = []
+var _pattern_ids: Array[String] = []
 
 
 func setup(p_config, p_content, seed: int = 12345) -> void:
@@ -43,6 +45,7 @@ func setup(p_config, p_content, seed: int = 12345) -> void:
 	rng.seed = seed
 	_shape_ids = content.get_shape_ids()
 	_color_ids = content.get_color_ids()
+	_pattern_ids = content.get_pattern_ids()
 	_reset_session_state()
 
 
@@ -51,6 +54,7 @@ func _reset_session_state() -> void:
 	phase_elapsed = 0.0
 	server_tick = 0
 	shots_remaining = 0
+	shot_cooldown_remaining = 0.0
 	scan_pulses_remaining = 0
 	players.clear()
 	objects.clear()
@@ -78,9 +82,28 @@ func add_hider(player_name: String, is_bot: bool = false) -> String:
 		"is_bot": is_bot,
 		"alive": true,
 		"object_id": "",
-		"score": 0
+		"score": 0,
+		"preferred_shape": "",
+		"preferred_color": "",
+		"preferred_pattern": ""
 	}
 	return player_id
+
+
+# Pre-join disguise choices from the phone lobby; applied when the hider spawns.
+func set_player_preferences(player_id: String, preferences: Dictionary) -> bool:
+	if not players.has(player_id):
+		return false
+	var shape := String(preferences.get("shape", ""))
+	var color := String(preferences.get("color", ""))
+	var pattern := String(preferences.get("pattern", ""))
+	if _shape_ids.has(shape):
+		players[player_id]["preferred_shape"] = shape
+	if _color_ids.has(color):
+		players[player_id]["preferred_color"] = color
+	if _pattern_ids.has(pattern):
+		players[player_id]["preferred_pattern"] = pattern
+	return true
 
 
 func add_spectator(player_name: String) -> String:
@@ -159,6 +182,7 @@ func start_round() -> bool:
 	_spawn_decoys()
 	_spawn_hiders()
 	shots_remaining = _calculate_bullets()
+	shot_cooldown_remaining = 0.0
 	scan_pulses_remaining = int(config.get_value("seeker", "scan_pulse_count", 1)) if bool(config.get_value("seeker", "scan_pulse_enabled", true)) else 0
 	stats["correct_shots"] = 0
 	stats["wrong_shots"] = 0
@@ -180,6 +204,7 @@ func confirm_room_setup() -> bool:
 func advance(delta: float) -> void:
 	server_tick += 1
 	phase_elapsed += delta
+	shot_cooldown_remaining = maxf(0.0, shot_cooldown_remaining - delta)
 	_update_hider_scores(delta)
 	match phase:
 		PHASE_ROOM_SETUP:
@@ -241,14 +266,30 @@ func apply_hider_input(player_id: String, input: Dictionary) -> bool:
 	return true
 
 
-func shoot_object(object_id: String) -> Dictionary:
+# Whether the gun can fire right now (phase, ammo, and cooldown gates).
+func can_fire() -> Dictionary:
 	if phase != PHASE_SEEK:
 		return {"accepted": false, "reason": "not_seek_phase"}
 	if shots_remaining <= 0:
 		return {"accepted": false, "reason": "no_shots_remaining"}
+	if shot_cooldown_remaining > 0.0:
+		return {"accepted": false, "reason": "shot_cooldown", "cooldown": shot_cooldown_remaining}
+	return {"accepted": true}
+
+
+# Starts the configurable between-shots wait; the hiders' escape window.
+func begin_shot_cooldown() -> void:
+	shot_cooldown_remaining = float(config.get_value("seeker", "shot_cooldown_seconds", 2.5))
+
+
+func shoot_object(object_id: String) -> Dictionary:
+	var gate := can_fire()
+	if not gate.get("accepted", false):
+		return gate
 	if not objects.has(object_id):
 		return {"accepted": false, "reason": "unknown_object"}
 	shots_remaining -= 1
+	begin_shot_cooldown()
 	stats["shots_fired"] = int(stats["shots_fired"]) + 1
 	var obj: Dictionary = objects[object_id]
 	if obj.get("is_hider", false) and obj.get("alive", true):
@@ -309,6 +350,13 @@ func release_object(object_id: String, velocity: Vector3 = Vector3.ZERO) -> bool
 		return false
 	obj["held_by_seeker"] = false
 	obj["velocity"] = velocity.limit_length(8.0)
+	# Thrown props tumble end over end in flight instead of gliding frozen.
+	var planar_speed := Vector2(velocity.x, velocity.z).length()
+	if planar_speed > 0.4:
+		var tumble_axis := velocity.cross(Vector3.UP)
+		if tumble_axis.length() > 0.001:
+			obj["spin_axis"] = -tumble_axis.normalized()
+			obj["spin_speed"] = clampf(planar_speed * 2.2, 0.0, 7.0)
 	if obj.get("is_hider", false) and obj.get("alive", false):
 		obj["inspected_survived"] = int(obj.get("inspected_survived", 0)) + 1
 	objects[object_id] = obj
@@ -317,7 +365,8 @@ func release_object(object_id: String, velocity: Vector3 = Vector3.ZERO) -> bool
 
 # Gravity + settling for free (unheld) decoys. Props fall until they land on the
 # floor or come to rest on top of another prop whose footprint they overlap, so
-# flat props placed squarely on others stack instead of sliding off.
+# flat props placed squarely on others stack instead of sliding off. Props
+# balanced on an edge slide off, and airborne props tumble.
 func _integrate_free_decoys(delta: float) -> void:
 	for object_id in objects:
 		var obj: Dictionary = objects[object_id]
@@ -327,40 +376,62 @@ func _integrate_free_decoys(delta: float) -> void:
 		var position: Vector3 = obj["position"]
 		# Only props that are off the floor or still moving can be stacked; floor
 		# props short-circuit the O(n) support scan.
-		var support_y := 0.15
+		var support := {"height": 0.15, "slide": Vector2.ZERO}
 		if position.y > 0.16 or velocity.length() >= 0.06:
-			support_y = _support_height(object_id, obj)
-		if position.y <= support_y + 0.002 and velocity.length() < 0.06:
+			support = _support_info(object_id, obj)
+		var support_y: float = support["height"]
+		var slide: Vector2 = support["slide"]
+		if position.y <= support_y + 0.002 and velocity.length() < 0.06 and slide.is_zero_approx():
 			_settle_orientation(obj, delta)
 			obj["velocity"] = Vector3.ZERO
 			obj["position"] = _clamp_to_play_area(Vector3(position.x, support_y, position.z))
 			objects[object_id] = obj
 			continue
 		velocity.y -= 9.8 * delta
+		# A prop hanging over the edge of its support slides outward until it
+		# either clears the edge and falls or gains solid footing.
+		if not slide.is_zero_approx():
+			velocity.x += slide.x * 6.0 * delta
+			velocity.z += slide.y * 6.0 * delta
 		position += velocity * delta
 		if position.y <= support_y:
 			position.y = support_y
 			velocity.y = abs(velocity.y) * 0.18
 			velocity.x *= 0.85
 			velocity.z *= 0.85
+			obj["spin_speed"] = float(obj.get("spin_speed", 0.0)) * 0.4
+		else:
+			_integrate_tumble(obj, delta)
 		obj["velocity"] = velocity.limit_length(8.0)
 		obj["position"] = _clamp_to_play_area(position)
 		objects[object_id] = obj
 
 
-# Tips a resting prop over toward its nearest stable face, the short way it is
-# actually leaning, and accelerates like gravity so it topples naturally instead
-# of spinning back to the pose it spawned in.
+# Airborne props rotate about their spin axis so throws and falls read as
+# tumbling physical objects rather than frozen statues.
+func _integrate_tumble(obj: Dictionary, delta: float) -> void:
+	var speed := float(obj.get("spin_speed", 0.0))
+	if speed <= 0.01:
+		return
+	var axis: Vector3 = obj.get("spin_axis", Vector3.RIGHT)
+	if axis.length() < 0.001:
+		return
+	var current: Quaternion = obj.get("orientation", Quaternion.IDENTITY)
+	obj["orientation"] = (Quaternion(axis.normalized(), speed * delta) * current).normalized()
+	obj["topple_speed"] = 0.0
+
+
+# Eases a resting prop toward the natural pose for its shape (its rest mode),
+# the short way it is actually leaning, accelerating like gravity so it topples
+# instead of snapping. Yaw is preserved, so a prop set down twisted stays twisted.
 func _settle_orientation(obj: Dictionary, delta: float) -> void:
 	var current: Quaternion = obj.get("orientation", Quaternion.IDENTITY)
-	# The prop's own face currently pointing most upward should end up on top.
-	var up_face := _nearest_axis(current.inverse() * Vector3.UP)
-	var face_world := (current * up_face).normalized()
-	var target := (Quaternion(face_world, Vector3.UP) * current).normalized()
+	var target := _rest_target(current, String(obj.get("rest_mode", "face")))
 	var angle := current.angle_to(target)
 	if angle < 0.01:
 		obj["orientation"] = target
 		obj["topple_speed"] = 0.0
+		obj["spin_speed"] = 0.0
 		return
 	var speed := minf(float(obj.get("topple_speed", 0.0)) + 9.0 * delta, 14.0)
 	obj["topple_speed"] = speed
@@ -368,21 +439,58 @@ func _settle_orientation(obj: Dictionary, delta: float) -> void:
 	obj["orientation"] = current.slerp(target, step / angle).normalized()
 
 
+# The orientation a prop of the given rest mode gravitates to from `current`:
+# face - nearest of its six axis faces down (boxes); flat - lie flat on its top
+# or underside (rings, books, stars); upright - always stand up (cones, ducks,
+# mugs); side - lie on its side (capsules); side_or_upright - stand if mostly
+# upright, else roll onto the side (cans, bottles); any - rest as placed (spheres).
+func _rest_target(current: Quaternion, rest_mode: String) -> Quaternion:
+	if rest_mode == "any":
+		return current
+	var local_up := current.inverse() * Vector3.UP
+	var face := Vector3.UP
+	match rest_mode:
+		"flat":
+			face = Vector3(0.0, 1.0 if local_up.y >= 0.0 else -1.0, 0.0)
+		"upright":
+			face = Vector3.UP
+		"side":
+			face = _nearest_axis(Vector3(local_up.x, 0.0, local_up.z))
+		"side_or_upright":
+			if local_up.y >= 0.707:
+				face = Vector3.UP
+			else:
+				face = _nearest_axis(Vector3(local_up.x, 0.0, local_up.z))
+		_:
+			face = _nearest_axis(local_up)
+	var face_world := (current * face).normalized()
+	if face_world.is_equal_approx(Vector3.UP):
+		return current
+	if face_world.is_equal_approx(Vector3.DOWN):
+		# Degenerate 180-degree flip; pick a consistent tipping direction.
+		return (current * Quaternion(Vector3.RIGHT, PI)).normalized()
+	return (Quaternion(face_world, Vector3.UP) * current).normalized()
+
+
 func _nearest_axis(v: Vector3) -> Vector3:
 	var ax := absf(v.x)
 	var ay := absf(v.y)
 	var az := absf(v.z)
-	if ax >= ay and ax >= az:
+	if ax >= ay and ax >= az and ax > 0.0001:
 		return Vector3(signf(v.x), 0.0, 0.0)
-	if ay >= az:
+	if ay >= az and ay > 0.0001:
 		return Vector3(0.0, signf(v.y), 0.0)
-	return Vector3(0.0, 0.0, signf(v.z))
+	if az > 0.0001:
+		return Vector3(0.0, 0.0, signf(v.z))
+	return Vector3.RIGHT
 
 
-# Highest resting center height for a prop: the floor, or the top of any prop
-# whose footprint it sits squarely over.
-func _support_height(object_id: String, obj: Dictionary) -> float:
+# Resting support for a prop: the floor, or the top of the highest prop whose
+# footprint it sits squarely over. A prop overlapping another prop's rim without
+# solid footing gets a slide direction pushing it off that edge.
+func _support_info(object_id: String, obj: Dictionary) -> Dictionary:
 	var support := 0.15
+	var slide := Vector2.ZERO
 	var self_radius := float(obj.get("collision_radius", 0.18))
 	var self_half := float(obj.get("half_height", 0.15))
 	var position: Vector3 = obj["position"]
@@ -395,12 +503,20 @@ func _support_height(object_id: String, obj: Dictionary) -> float:
 		var other_position: Vector3 = other["position"]
 		if other_position.y >= position.y + 0.02:
 			continue
-		var footprint := Vector2(position.x - other_position.x, position.z - other_position.z).length()
-		if footprint < (self_radius + float(other.get("collision_radius", 0.18))) * 0.7:
-			var top := other_position.y + float(other.get("half_height", 0.15)) + self_half
+		var offset := Vector2(position.x - other_position.x, position.z - other_position.z)
+		var footprint := offset.length()
+		var combined := self_radius + float(other.get("collision_radius", 0.18))
+		var top := other_position.y + float(other.get("half_height", 0.15)) + self_half
+		if footprint < combined * 0.7:
 			if top > support:
 				support = top
-	return support
+				slide = Vector2.ZERO
+		elif footprint < combined and position.y > top - 0.15 and position.y < top + 0.08 and top > support:
+			# Balanced on the rim: rests there momentarily but keeps sliding
+			# outward until it clears the edge and drops.
+			support = top
+			slide = offset.normalized() if footprint > 0.001 else Vector2.RIGHT
+	return {"height": support, "slide": slide}
 
 
 func move_held_object(object_id: String, position: Vector3) -> bool:
@@ -423,7 +539,9 @@ func get_state_snapshot(for_player_id: String = "") -> Dictionary:
 			"object_id": object_id,
 			"shape": obj["shape"],
 			"color": obj["color"],
+			"pattern": obj.get("pattern", "solid"),
 			"position": _vector3_to_array(obj["position"]),
+			"orientation": _quaternion_to_array(obj.get("orientation", Quaternion.IDENTITY)),
 			"velocity": _vector3_to_array(obj["velocity"]),
 			"is_hider": obj["is_hider"] if for_player_id.is_empty() else obj.get("owner_player_id", "") == for_player_id,
 			"alive": obj["alive"]
@@ -435,9 +553,14 @@ func get_state_snapshot(for_player_id: String = "") -> Dictionary:
 			"phase": phase,
 			"time_remaining": _time_remaining(),
 			"shots_remaining": shots_remaining,
+			"shot_cooldown_remaining": snappedf(shot_cooldown_remaining, 0.01),
 			"scan_pulses_remaining": scan_pulses_remaining,
 			"players": players.values(),
 		"objects": object_list,
+		"seeker": {
+			"position": _vector3_to_array(seeker_position),
+			"forward": _vector3_to_array(seeker_forward)
+		},
 		"hider_state": get_hider_state(for_player_id),
 		"danger": get_danger_for_player(for_player_id),
 		"cooldowns": get_hider_cooldowns(for_player_id),
@@ -462,6 +585,7 @@ func get_hider_state(player_id: String) -> Dictionary:
 		"alive": obj.get("alive", false),
 		"shape": obj.get("shape", ""),
 		"color": obj.get("color", ""),
+		"pattern": obj.get("pattern", "solid"),
 		"position": _vector3_to_array(obj.get("position", Vector3.ZERO)),
 		"held_by_seeker": obj.get("held_by_seeker", false),
 		"freeze": obj.get("freeze", false)
@@ -551,11 +675,16 @@ func _spawn_hiders() -> void:
 	for player_id in players:
 		if players[player_id].get("role", "") != "hider":
 			continue
-		var object_id := _create_object(true, player_id)
+		var player: Dictionary = players[player_id]
+		var object_id := _create_object(true, player_id, {
+			"shape": player.get("preferred_shape", ""),
+			"color": player.get("preferred_color", ""),
+			"pattern": player.get("preferred_pattern", "")
+		})
 		players[player_id]["object_id"] = object_id
 
 
-func _create_object(is_hider: bool, owner_player_id: String) -> String:
+func _create_object(is_hider: bool, owner_player_id: String, overrides: Dictionary = {}) -> String:
 	var object_id := "obj_%03d" % _next_object_index
 	_next_object_index += 1
 	var angle := rng.randf_range(0.0, TAU)
@@ -563,17 +692,30 @@ func _create_object(is_hider: bool, owner_player_id: String) -> String:
 	var y := float(config.get_value("objects", "spawn_height_meters", 2.5)) if not is_hider else 0.15
 	var position := Vector3(cos(angle) * radius, y, sin(angle) * radius)
 	var shape: String = content.pick_weighted_shape(rng)
+	if _shape_ids.has(String(overrides.get("shape", ""))):
+		shape = String(overrides["shape"])
+	var color: String = content.pick_color(rng)
+	if _color_ids.has(String(overrides.get("color", ""))):
+		color = String(overrides["color"])
+	var pattern: String = content.pick_weighted_pattern(rng)
+	if _pattern_ids.has(String(overrides.get("pattern", ""))):
+		pattern = String(overrides["pattern"])
 	var rotation_y := rng.randf_range(0.0, TAU)
+	var spin_axis := Vector3(rng.randf_range(-1.0, 1.0), rng.randf_range(-0.4, 0.4), rng.randf_range(-1.0, 1.0))
 	objects[object_id] = {
 		"object_id": object_id,
 		"shape": shape,
+		"rest_mode": content.get_shape_rest_mode(shape),
 		"collision_radius": _collision_radius_for_shape(shape),
 		"half_height": _half_height_for_shape(shape),
-		"color": content.pick_color(rng),
+		"color": color,
+		"pattern": pattern,
 		"position": position,
 		"rotation_y": rotation_y,
 		"orientation": Quaternion(Vector3.UP, rotation_y),
 		"velocity": Vector3(rng.randf_range(-0.3, 0.3), 0.0, rng.randf_range(-0.3, 0.3)),
+		"spin_axis": spin_axis.normalized() if spin_axis.length() > 0.001 else Vector3.RIGHT,
+		"spin_speed": rng.randf_range(0.5, 3.0) if not is_hider else 0.0,
 		"move_input": Vector2.ZERO,
 		"freeze": false,
 		"is_hider": is_hider,
@@ -626,6 +768,10 @@ func _integrate_object_rain(delta: float) -> void:
 			velocity.y = abs(velocity.y) * 0.22
 			velocity.x *= 0.92
 			velocity.z *= 0.92
+			obj["spin_speed"] = float(obj.get("spin_speed", 0.0)) * 0.5
+			_settle_orientation(obj, delta)
+		else:
+			_integrate_tumble(obj, delta)
 		obj["position"] = _clamp_to_play_area(position)
 		obj["velocity"] = velocity.limit_length(8.0)
 		objects[object_id] = obj
@@ -683,6 +829,7 @@ func _try_change_shape(obj: Dictionary, shape_id: String) -> void:
 	if float(obj.get("shape_cooldown", 0.0)) > 0.0:
 		return
 	obj["shape"] = shape_id
+	obj["rest_mode"] = content.get_shape_rest_mode(shape_id)
 	obj["collision_radius"] = _collision_radius_for_shape(shape_id)
 	obj["half_height"] = _half_height_for_shape(shape_id)
 	obj["shape_cooldown"] = float(config.get_value("hiders", "shape_change_cooldown", 12.0))
@@ -759,15 +906,17 @@ func _time_remaining() -> float:
 
 func _collision_radius_for_shape(shape_id: String) -> float:
 	match shape_id:
-		"capsule":
+		"bottle":
+			return 0.12
+		"capsule", "gem":
 			return 0.15
 		"sphere", "duck", "cylinder", "can", "mug", "cone":
 			return 0.16
-		"ring":
+		"ring", "donut":
 			return 0.17
 		"cube", "toy_block":
 			return 0.19
-		"pyramid", "star":
+		"pyramid", "star", "book":
 			return 0.20
 	return 0.18
 
@@ -776,9 +925,15 @@ func _collision_radius_for_shape(shape_id: String) -> float:
 # surface sits, and how far its resting center is above whatever supports it.
 func _half_height_for_shape(shape_id: String) -> float:
 	match shape_id:
+		"book":
+			return 0.05
+		"donut":
+			return 0.06
 		"ring":
 			return 0.08
-		"cube", "toy_block", "pyramid", "star":
+		"star":
+			return 0.09
+		"cube", "toy_block", "pyramid", "gem":
 			return 0.14
 		"sphere", "duck":
 			return 0.16
@@ -786,6 +941,8 @@ func _half_height_for_shape(shape_id: String) -> float:
 			return 0.17
 		"capsule":
 			return 0.18
+		"bottle":
+			return 0.19
 	return 0.15
 
 
@@ -860,7 +1017,11 @@ func _clamp_to_play_area(position: Vector3) -> Vector3:
 
 
 func _vector3_to_array(value: Vector3) -> Array[float]:
-	return [value.x, value.y, value.z]
+	return [snappedf(value.x, 0.001), snappedf(value.y, 0.001), snappedf(value.z, 0.001)]
+
+
+func _quaternion_to_array(value: Quaternion) -> Array[float]:
+	return [snappedf(value.x, 0.001), snappedf(value.y, 0.001), snappedf(value.z, 0.001), snappedf(value.w, 0.001)]
 
 
 func _active_hider_player_ids() -> Array[String]:

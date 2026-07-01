@@ -14,6 +14,8 @@ static func validate_client_message(message: Dictionary) -> Array[String]:
 			_require_string(message, "room_id", errors)
 			_require_string(message, "token", errors)
 			_require_string(message, "player_name", errors)
+			for optional_key in ["preferred_shape", "preferred_color", "preferred_pattern"]:
+				_optional_string(message, optional_key, errors)
 		"hider_input":
 			_require_string(message, "player_id", errors)
 			if not message.get("move", null) is Array or message["move"].size() != 2:
@@ -47,4 +49,9 @@ static func _validate_common(message: Dictionary, allowed_types: Array, errors: 
 static func _require_string(message: Dictionary, key: String, errors: Array[String]) -> void:
 	if not message.get(key, null) is String or message[key].is_empty():
 		errors.append("%s must be a non-empty string" % key)
+
+
+static func _optional_string(message: Dictionary, key: String, errors: Array[String]) -> void:
+	if message.has(key) and message[key] != null and not message[key] is String:
+		errors.append("%s must be a string when present" % key)
 

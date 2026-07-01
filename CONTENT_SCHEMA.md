@@ -23,16 +23,18 @@ Currently used gameplay settings include:
 - `round.results_seconds`
 - `round.max_hiders`
 - `objects.decoy_count`
-- `seeker.bullets_base`
+- `seeker.base_bullets`
 - `seeker.bullets_per_hider`
+- `seeker.shot_cooldown_seconds` — wait between shots; the hiders' escape window.
 - `seeker.scan_pulse_enabled`
 - `seeker.scan_pulse_count`
-- `hiders.move_speed`
-- `hiders.freeze_bonus_seconds`
+- `hiders.movement_speed`
 - `hiders.shape_change_cooldown`
 - `hiders.color_change_cooldown`
 - `hiders.bot_decision_seconds`
-- `network.default_port`
+- `network.port`
+- `network.discovery_port` — UDP port for the LAN game beacon (must differ from `network.port`).
+- `network.discovery_interval_seconds`
 - `network.allow_late_join`
 
 ## `objects/shapes.json`
@@ -47,6 +49,15 @@ Array of shape definitions:
 - `bounce`: `0.0` to `1.0`.
 - `roll_factor`: `0.0` to `1.5`.
 - `rarity_weight`: positive number.
+- `rest_mode`: how the prop settles when dropped — one of:
+  - `face`: topples to the nearest of its six axis faces (cube, toy block).
+  - `flat`: lies flat on its top or underside (ring, donut, book, star).
+  - `upright`: always stands back up (cone, pyramid, duck, mug).
+  - `side`: lies on its side (capsule).
+  - `side_or_upright`: stands if mostly upright, else rolls onto its side (cylinder, can, bottle).
+  - `any`: rests exactly as placed (sphere).
+
+Visual meshes for each shape id are built in `game/scripts/shared/props/prop_factory.gd`; adding a shape id without a factory case falls back to a cube mesh.
 
 ## `objects/colors.json`
 
@@ -56,3 +67,13 @@ Array of colors:
 - `display_name`: UI label.
 - `hex`: `#RRGGBB`.
 - `colorblind_safe`: boolean.
+
+## `objects/patterns.json`
+
+Array of surface patterns applied on top of the color:
+
+- `id`: stable lowercase identifier (`solid` must exist).
+- `display_name`: UI label.
+- `spawn_weight`: positive number; relative chance a decoy spawns with this pattern.
+
+Pattern rendering (procedural textures / material properties) is implemented per id in `prop_factory.gd`: `stripes`, `dots`, `checker`, `wood` are grayscale tile textures; `metallic` and `glow` adjust material properties; unknown ids render as solid.

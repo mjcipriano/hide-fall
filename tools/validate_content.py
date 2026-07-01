@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTENT = ROOT / "game" / "content"
 HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 SIZE_CLASSES = {"small", "medium", "large"}
+REST_MODES = {"face", "any", "flat", "upright", "side", "side_or_upright"}
 
 
 def load_json(path: Path):
@@ -41,6 +42,12 @@ def validate_settings() -> None:
         fail(f"{path} objects.max_decoy_count must be >= decoy_count")
     if data["network"]["transport"] != "websocket_lan":
         fail(f"{path} network.transport must be websocket_lan")
+    if not 0 <= data["seeker"].get("shot_cooldown_seconds", 0) <= 30:
+        fail(f"{path} seeker.shot_cooldown_seconds must be 0..30")
+    if not 1024 <= data["network"].get("discovery_port", 29445) <= 65535:
+        fail(f"{path} network.discovery_port must be a valid port")
+    if data["network"].get("discovery_port", 29445) == data["network"]["port"]:
+        fail(f"{path} network.discovery_port must differ from network.port")
 
 
 def validate_colors() -> None:
@@ -65,7 +72,7 @@ def validate_shapes() -> None:
     for shape in shapes:
         require_keys(
             shape,
-            ["id", "display_name", "size_class", "mass", "friction", "bounce", "roll_factor", "rarity_weight"],
+            ["id", "display_name", "size_class", "mass", "friction", "bounce", "roll_factor", "rarity_weight", "rest_mode"],
             path,
         )
         if shape["id"] in ids:
@@ -77,14 +84,32 @@ def validate_shapes() -> None:
             fail(f"{path} shape {shape['id']} mass and rarity_weight must be positive")
         if not 0 <= shape["bounce"] <= 1:
             fail(f"{path} shape {shape['id']} bounce must be 0..1")
+        if shape["rest_mode"] not in REST_MODES:
+            fail(f"{path} shape {shape['id']} has invalid rest_mode {shape['rest_mode']}")
     if len(shapes) < 12:
         fail(f"{path} should define the 12 MVP shapes")
+
+
+def validate_patterns() -> None:
+    path = CONTENT / "objects" / "patterns.json"
+    patterns = load_json(path)
+    ids: set[str] = set()
+    for pattern in patterns:
+        require_keys(pattern, ["id", "display_name", "spawn_weight"], path)
+        if pattern["id"] in ids:
+            fail(f"{path} duplicate pattern id {pattern['id']}")
+        ids.add(pattern["id"])
+        if pattern["spawn_weight"] <= 0:
+            fail(f"{path} pattern {pattern['id']} spawn_weight must be positive")
+    if "solid" not in ids:
+        fail(f"{path} must define the solid pattern")
 
 
 def main() -> None:
     validate_settings()
     validate_colors()
     validate_shapes()
+    validate_patterns()
     print("content validation passed")
 
 

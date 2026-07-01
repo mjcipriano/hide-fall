@@ -1,0 +1,9 @@
+[
+  {"id": "solid", "display_name": "Solid", "spawn_weight": 6.0},
+  {"id": "stripes", "display_name": "Stripes", "spawn_weight": 1.0},
+  {"id": "dots", "display_name": "Dots", "spawn_weight": 1.0},
+  {"id": "checker", "display_name": "Checker", "spawn_weight": 0.8},
+  {"id": "wood", "display_name": "Wood Toy", "spawn_weight": 0.8},
+  {"id": "metallic", "display_name": "Metallic", "spawn_weight": 0.6},
+  {"id": "glow", "display_name": "Glow", "spawn_weight": 0.3}
+]

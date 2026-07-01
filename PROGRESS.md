@@ -594,9 +594,47 @@ This file is the handoff point for future agents. Keep it current before and aft
   - Cleaned up the XR HUD into a non-overlapping low-centered stack (phase / status / controls) with clearer prompts; debug dump is desktop-only.
 - Bumped version to `0.2.6` (code 8) and updated `README.md` controls/gameplay.
 
-## Next
+## Next (superseded by 2026-07-01 v0.3.0 session below)
 
-1. Release `v0.2.6` from the pushed tag and verify the published Quest/mobile APKs (assets + `sha256sum -c` + `tools/verify_android_artifacts.sh`), then smoke-test the released Quest APK in-headset.
+1. ~~Release `v0.2.6`~~ — done; `Hidefall 0.2.6` published 2026-07-01.
 2. If the user reports another headset issue, start from `build/quest-smoke/quest-smoke-logcat.txt`, rerun the released APK smoke test, and grep logcat for `tonemapper`/`SCRIPT ERROR` first.
 3. Open feel question: movement scoring currently rewards raw distance travelled, which is opposite the classic "hide by freezing" design — revisit whether to reward stealthy movement or cap it.
 4. Non-blocking cleanup: update GitHub Actions setup-miniconda options to remove deprecation annotations for `auto-activate-base` and implicit `defaults` channel.
+
+## 2026-07-01 v0.3.0 Feature Pass (physics feel, shapes/patterns, discovery, mobile 3D, gun cooldown)
+
+User direction: stacking/twisting still not natural; make shapes/textures more interesting; mobile is bare-bones — add LAN discovery (in-headset QR makes no sense since a phone can't see it), make the phone show the same 3D world with pre-join shape/color choice; add a configurable gun cooldown so hiders can escape and re-hide; keep docs current for agent handoff.
+
+- Physics feel (`hidefall_simulation.gd`):
+  - Per-shape `rest_mode` in `shapes.json` (`face`/`flat`/`upright`/`side`/`side_or_upright`/`any`); settling eases toward the shape's natural pose and preserves yaw, so a prop set down twisted stays twisted, cans/bottles roll onto their side, cones/ducks/mugs stand up, rings/books lie flat, spheres rest as placed.
+  - Airborne props tumble (`spin_axis`/`spin_speed`, integrated while off support); throws add tumble; landings damp spin.
+  - Rim support: props dropped overlapping another prop's edge rest momentarily on the rim and slide outward until they drop off (`_support_info` returns height + slide), instead of hovering or tunneling.
+- Shapes/patterns:
+  - 4 new shapes (`book`, `bottle`, `donut`, `gem`) with sim sizes; 7 data-driven patterns in new `content/objects/patterns.json` (solid/stripes/dots/checker/wood/metallic/glow, spawn-weighted).
+  - New shared `scripts/shared/props/prop_factory.gd`: composite toy meshes for all 16 shapes (duck with head+beak, mug with handle, LEGO-ish toy block, starfish, gem cut, etc.) plus cached procedural grayscale pattern textures multiplied by the albedo color; metallic/glow via material properties. Used by BOTH the Quest host and the mobile client.
+- LAN discovery:
+  - New `lan_game_announcer.gd` (host UDP broadcast beacon, default udp/29445, ~1/sec, includes host_name/ip/port/room/token/phase/players) and `lan_game_browser.gd` (phone-side listener with 5s expiry). Settings: `network.discovery_port`, `network.discovery_interval_seconds`.
+  - Quest XR HUD no longer shows the (unscannable) QR; it shows join info text instead. Desktop HUD keeps the QR.
+- Mobile client rewritten (`hider_client.gd`):
+  - Lobby: name field, shape/color/pattern pickers with live rotating 3D preview, auto-discovered games list (tap to join), manual join collapsed behind a toggle, styled dark/cyan UI.
+  - Pre-join disguise choices ride `join_request` as `preferred_shape/color/pattern`; host validates and spawns the hider with them (`set_player_preferences`).
+  - In-round: full 3D render of the same room (floor, boundary ring, all props with orientation+pattern from snapshots, interpolated), follow camera behind own prop with drag-to-orbit, camera-relative joystick, seeker avatar with view cone, own-prop marker ring, danger badge, GUN COOLING hint, FOUND/INSPECTED/SPECTATING overlays.
+- Gun cooldown:
+  - `seeker.shot_cooldown_seconds` (default 2.5) in settings; `can_fire()`/`begin_shot_cooldown()` in the sim; shots (and air shots) start the cooldown; HUD shows Gun READY/COOLING/EMPTY; snapshot carries `shot_cooldown_remaining` so phones show the escape window.
+- Protocol stays version 1: all new message fields are optional/additive (documented in `NETWORK_PROTOCOL.md` incl. the discovery beacon).
+- Snapshots now include object `orientation` quaternions + `pattern`, `seeker` pose, and rounded floats (3 decimals) to bound payload size.
+- Fixed a latent CI flake in `tools/verify_android_artifacts.sh`: `aapt | grep -q` under pipefail can fail on SIGPIPE when grep matches early; badging output is captured first now.
+- Bumped version to `0.3.0` / code 9 (`export_presets.cfg` + `tools/validate_android_config.py` pins).
+- Verification:
+  - `make test` passes: 173 assertions incl. new tests for rest modes, yaw preservation, tumbling, rim slide-off, shot cooldown, spawn preferences, prop factory meshes/materials, beacon build/parse + live UDP loopback, mobile join-request preferences, camera-relative movement, and 3D world mirroring.
+  - Signed `make build-apks` + `make verify-apks` pass.
+  - Quest smoke passed on hardware over wireless adb (192.168.0.253:5555): install-over OK, `Hidefall visible gameplay ready ... objects=78 xr=OpenXR immersive passthrough`, `Hidefall LAN announcer broadcasting on udp/29445`, zero tonemapper/SCRIPT ERROR lines.
+  - Note: WSL2 NAT cannot see LAN broadcasts, so beacon reception was verified via the in-test UDP loopback + on-device announcer log; real phone-side listing still needs a phone test.
+
+## Next
+
+1. Install `build/hidefall-mobile.apk` on an Android phone and verify: game auto-appears in the lobby list, tap-join works, pre-join disguise applies, the 3D world view tracks the round, and the joystick moves the prop camera-relative.
+2. Have the user put on the headset to feel-check the new settling (twist preservation, side-resting cans, slide-off), the new shapes/patterns, and the gun cooldown pacing (`seeker.shot_cooldown_seconds`).
+3. Commit/push, watch GitHub Actions, tag `v0.3.0`, verify release assets (sha256 + `tools/verify_android_artifacts.sh`), smoke-test the released Quest APK.
+4. Then discuss hider abilities (earthquake, quick sprint, decoy twitch...) — design hooks exist (`hiders.abilities_enabled`, `ability` field in hider_input is already accepted but unused).
+5. Known gaps: hiders themselves don't stack on props (they stay at floor height); Android broadcast reception can be flaky on some routers/devices (manual join is the fallback); iOS build path still untested.

@@ -16,6 +16,7 @@
   "seeker": {
     "base_bullets": 3,
     "bullets_per_hider": 1,
+    "shot_cooldown_seconds": 2.5,
     "allow_pickup": true,
     "allow_throwing": true,
     "scan_pulse_enabled": true,
@@ -35,6 +36,8 @@
     "allow_late_join": false,
     "transport": "websocket_lan",
     "port": 29444,
+    "discovery_port": 29445,
+    "discovery_interval_seconds": 1.0,
     "protocol_version": 1
   }
 }

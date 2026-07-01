@@ -28,9 +28,9 @@ Godot itself is installed by `make install-godot` into `tools/godot/` from the o
 make run
 ```
 
-The current executable scene is a Godot prototype of the Quest host experience. On headset it launches directly into a solo bot round with visible falling props, an immersive OpenXR/MR view, a head-locked status panel, and a left-hand wrist menu. It also runs a WebSocket LAN host, shows a QR join code plus manual payload, and supports joined phone hiders. On desktop/headless it starts in a lobby with a normal camera and CanvasLayer HUD for local testing.
+The current executable scene is a Godot prototype of the Quest host experience. On headset it launches directly into a solo bot round with visible falling props, an immersive OpenXR/MR view, a head-locked status panel, and a left-hand wrist menu. It also runs a WebSocket LAN host, broadcasts a UDP discovery beacon so phones list the game automatically, shows join info in-headset (QR remains on the desktop HUD, where a phone camera can actually see it), and supports joined phone hiders. On desktop/headless it starts in a lobby with a normal camera and CanvasLayer HUD for local testing.
 
-Implemented gameplay includes lobby ready gating, room setup confirmation, object rain, blackout, seek, results/rematch, hider movement and freeze, shape/color disguise changes, and bot hider behavior. Props collide and stack instead of interpenetrating, fall under gravity, can be thrown, and topple to rest flat on a face when dropped. The seeker can hold-grab and twist props (distant grabs travel to the hand), fires a shot laser with hit/miss/empty sound cues, has limited shots that stop firing when depleted, and a limited scan pulse. Hiders earn points for how far they travel; the seeker scores for finds and is penalized for wrong shots. Late-join spectators and LAN phone client snapshots are supported.
+Implemented gameplay includes lobby ready gating, room setup confirmation, object rain, blackout, seek, results/rematch, hider movement and freeze, shape/color disguise changes, and bot hider behavior. There are 16 shapes (composite toy meshes: duck, mug, bottle, gem, donut, book, star...) and 7 surface patterns (stripes, dots, checker, wood, metallic, glow) generated procedurally. Props collide and stack instead of interpenetrating, fall under gravity, tumble when thrown, slide off when dropped on another prop's rim, and settle per-shape: boxes topple to a face, cans/bottles roll onto their side, cones and ducks stand back up, rings lie flat, and spheres rest exactly as placed - a prop set down twisted stays twisted. The seeker can hold-grab and twist props (distant grabs travel to the hand), fires a shot laser with hit/miss/empty sound cues, has limited shots and a configurable between-shot cooldown (the hiders' escape window - phones see "GUN COOLING"), plus a limited scan pulse. Hiders earn points for how far they travel; the seeker scores for finds and is penalized for wrong shots. Late-join spectators and LAN phone client snapshots are supported.
 
 Controls:
 
@@ -47,14 +47,12 @@ Controls:
 
 The Godot mobile hider scene is `res://scenes/mobile/hider_client.tscn`. It includes:
 
-- Host, port, room, token, and name fields.
-- WebSocket connection and join request.
-- Periodic hider input messages.
-- Freeze, color, and shape controls.
+- A lobby that auto-discovers Hidefall games on the local Wi-Fi (UDP beacon) with a tap-to-join list; manual host/port/room/code entry remains as fallback.
+- Pre-join disguise selection: shape, color, and pattern pickers with a live rotating 3D preview; choices are sent in the join request and used at spawn.
+- An in-round 3D view of the same virtual room the Quest seeker sees (not AR): all props with their true shapes/colors/patterns/orientations, a follow camera behind your prop, drag-to-orbit, and a seeker avatar with a view cone.
+- A touch joystick (camera-relative movement), hold-to-freeze, and color/shape change buttons.
 - Ready/unready control before the round starts.
-- Top-down map rendering from authoritative snapshots.
-- Danger, cooldown, phase, and hider status display.
-- Spectator status for late joins after a round starts.
+- Danger badge, cooldowns, phase timer, "GUN COOLING" escape hint, and inspected/found/spectator overlays.
 
 It is functional as a Godot client scene. A debug Android APK export preset is included.
 

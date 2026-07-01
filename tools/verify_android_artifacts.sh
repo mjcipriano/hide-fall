@@ -46,7 +46,10 @@ fi
 quest_manifest_file="$(mktemp)"
 mobile_manifest_file="$(mktemp)"
 trap 'rm -f "${quest_manifest_file}" "${mobile_manifest_file}"' EXIT
-"${BUILD_TOOLS_DIR}/aapt" dump badging "${quest_apk}" | grep -q "targetSdkVersion:'35'" || {
+# Capture badging first: piping aapt straight into grep -q can fail under
+# pipefail when grep matches early and aapt dies from SIGPIPE.
+quest_badging="$("${BUILD_TOOLS_DIR}/aapt" dump badging "${quest_apk}")"
+grep -q "targetSdkVersion:'35'" <<< "${quest_badging}" || {
   echo "Quest APK targetSdkVersion must be 35 for current Quest/OpenXR Vulkan compatibility" >&2
   exit 1
 }
