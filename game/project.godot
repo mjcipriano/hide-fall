@@ -23,6 +23,7 @@ openxr/form_factor=0
 openxr/reference_space=1
 openxr/environment_blend_mode=0
 openxr/extensions/meta/passthrough=true
+shaders/enabled=true
 
 [input]
 
@@ -73,5 +74,6 @@ start_round={
 
 [rendering]
 
-renderer/rendering_method="gl_compatibility"
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
 textures/vram_compression/import_etc2_astc=true

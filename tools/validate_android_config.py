@@ -6,8 +6,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 EXPORT_PRESETS = ROOT / "game" / "export_presets.cfg"
 PROJECT = ROOT / "game" / "project.godot"
-EXPECTED_VERSION = "0.2.4"
-EXPECTED_VERSION_CODE = "6"
+EXPECTED_VERSION = "0.2.5"
+EXPECTED_VERSION_CODE = "7"
 
 
 def main() -> None:
@@ -22,7 +22,8 @@ def main() -> None:
     require("openxr/enabled=true", project_text, "Project OpenXR is enabled")
     require("openxr/environment_blend_mode=0", project_text, "Project OpenXR starts opaque")
     require("openxr/extensions/meta/passthrough=true", project_text, "Project enables the Meta passthrough extension")
-    require('renderer/rendering_method="gl_compatibility"', project_text, "Project uses the Android XR compatible renderer")
+    require('renderer/rendering_method="mobile"', project_text, "Project uses the Forward Mobile renderer required for OpenXR multiview")
+    require("shaders/enabled=true", project_text, "Project enables XR multiview shader variants (prevents blank passthrough)")
     print("android export config validation passed")
 
 
