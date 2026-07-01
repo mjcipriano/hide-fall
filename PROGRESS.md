@@ -631,6 +631,14 @@ User direction: stacking/twisting still not natural; make shapes/textures more i
   - Quest smoke passed on hardware over wireless adb (192.168.0.253:5555): install-over OK, `Hidefall visible gameplay ready ... objects=78 xr=OpenXR immersive passthrough`, `Hidefall LAN announcer broadcasting on udp/29445`, zero tonemapper/SCRIPT ERROR lines.
   - Note: WSL2 NAT cannot see LAN broadcasts, so beacon reception was verified via the in-test UDP loopback + on-device announcer log; real phone-side listing still needs a phone test.
 
+## 2026-07-01 v0.3.0 Release Verification
+
+- Committed and pushed `f30d2c9` to `master`; Test And Build run `28554426100` passed (test + android-apks).
+- Tagged and pushed `v0.3.0`; Release run `28554611326` and tag Test And Build run `28554611315` both passed.
+- GitHub Release `Hidefall 0.3.0` published with `hidefall-quest-0.3.0.apk`, `hidefall-mobile-0.3.0.apk`, `SHA256SUMS`.
+- Downloaded assets: `sha256sum -c` passed; `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 tools/verify_android_artifacts.sh` passed.
+- Released Quest APK smoke passed on hardware over wireless adb (one uninstall was needed because the headset had the locally debug-signed 0.3.0 smoke build; release installs will now install-over): `Hidefall visible gameplay ready ... objects=78 xr=OpenXR immersive passthrough`, `Hidefall LAN announcer broadcasting on udp/29445`, zero tonemapper/SCRIPT ERROR lines.
+
 ## Next
 
 1. Install `build/hidefall-mobile.apk` on an Android phone and verify: game auto-appears in the lobby list, tap-join works, pre-join disguise applies, the 3D world view tracks the round, and the joystick moves the prop camera-relative.
