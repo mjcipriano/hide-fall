@@ -10,6 +10,7 @@ const WebSocketLanHostScript := preload("res://scripts/shared/networking/websock
 const LanGameAnnouncerScript := preload("res://scripts/shared/networking/lan_game_announcer.gd")
 const LanGameBrowserScript := preload("res://scripts/shared/networking/lan_game_browser.gd")
 const PropFactoryScript := preload("res://scripts/shared/props/prop_factory.gd")
+const XrSettingsMenuScript := preload("res://scripts/quest/seeker/xr_settings_menu.gd")
 
 var failures := 0
 
@@ -33,6 +34,7 @@ func _init() -> void:
 func _run() -> void:
 	Engine.max_fps = 0
 	_test_content_loads()
+	_test_config_overrides()
 	_test_project_xr_startup_settings()
 	_test_qr_code_generation()
 	_test_network_validation()
@@ -49,8 +51,10 @@ func _run() -> void:
 	_test_rest_modes()
 	_test_thrown_prop_tumbles()
 	_test_shot_cooldown()
+	_test_end_round()
 	_test_hider_preferences()
 	_test_prop_factory()
+	_test_xr_settings_menu()
 	_test_lan_discovery()
 	_test_scoring_rules()
 	await _test_host_scene_smoke()
@@ -90,6 +94,21 @@ func _test_content_loads() -> void:
 	_assert(content.get_pattern_ids().has("solid"), "solid pattern exists")
 	_assert(content.get_shape_rest_mode("sphere") == "any", "sphere rest mode loads")
 	_assert(content.get_shape_rest_mode("ring") == "flat", "ring rest mode loads")
+
+
+func _test_config_overrides() -> void:
+	var path := "user://hidefall_test_settings.json"
+	var config = GameConfigScript.new()
+	config.load_default()
+	config.set_value("seeker", "shot_cooldown_seconds", 1.5)
+	config.set_value("hiders", "bot_count", 4)
+	_assert(config.save_overrides(path), "config overrides save to user path")
+	var loaded = GameConfigScript.new()
+	loaded.load_default()
+	_assert(loaded.apply_overrides(path), "config overrides apply from user path")
+	_assert(absf(float(loaded.get_value("seeker", "shot_cooldown_seconds", 0.0)) - 1.5) < 0.001, "saved gun cooldown override loads")
+	_assert(int(loaded.get_value("hiders", "bot_count", 0)) == 4, "saved bot count override loads")
+	_assert(int(loaded.get_value("objects", "decoy_count", 0)) == 75, "deep merge keeps default settings")
 
 
 func _test_project_xr_startup_settings() -> void:
@@ -431,6 +450,16 @@ func _test_shot_cooldown() -> void:
 	_assert(sim.get_state_snapshot().has("shot_cooldown_remaining"), "snapshot exposes the gun cooldown")
 
 
+func _test_end_round() -> void:
+	var sim = _new_sim(606)
+	sim.add_bot_hiders(1)
+	sim.start_round()
+	sim.confirm_room_setup()
+	_assert(sim.end_round(), "active round can be ended manually")
+	_assert(sim.phase == HidefallSimulationScript.PHASE_RESULTS, "manual end round enters results")
+	_assert(not sim.end_round(), "results phase is not ended again")
+
+
 func _test_hider_preferences() -> void:
 	var sim = _new_sim(605)
 	var player_id := sim.add_hider("Chooser")
@@ -463,6 +492,37 @@ func _test_prop_factory() -> void:
 	var glow := PropFactoryScript.make_material(Color.GREEN, "glow")
 	_assert(glow.emission_enabled, "glow pattern enables emission")
 	_assert(PropFactoryScript.pattern_texture("dots") == PropFactoryScript.pattern_texture("dots"), "pattern textures are cached")
+
+
+func _test_xr_settings_menu() -> void:
+	var config = GameConfigScript.new()
+	config.load_default()
+	var menu = XrSettingsMenuScript.new()
+	menu.setup(config)
+	root.add_child(menu)
+	menu.set_open(true)
+	_assert(menu.get_row_count() >= 10, "XR settings menu builds action and setting rows")
+	_assert(menu.get_row_label(2).contains("Gun cooldown"), "XR settings menu shows gun cooldown row")
+	var changed := {"section": "", "key": "", "value": null}
+	menu.setting_changed.connect(func(section, key, value) -> void:
+		changed["section"] = section
+		changed["key"] = key
+		changed["value"] = value
+	)
+	var hovered := menu.update_pointer(Vector3(0.0, 0.226, 1.0), Vector3(0.0, 0.0, -1.0))
+	_assert(hovered, "XR settings menu pointer intersects the panel")
+	_assert(menu.activate_hovered(), "XR settings menu activates hovered setting row")
+	_assert(changed.get("section", "") == "seeker" and changed.get("key", "") == "shot_cooldown_seconds", "XR settings menu emits setting change")
+	_assert(absf(float(config.get_value("seeker", "shot_cooldown_seconds", 0.0)) - 3.5) < 0.001, "XR settings menu cycles config value")
+	var action := {"value": ""}
+	menu.action_requested.connect(func(value) -> void:
+		action["value"] = String(value)
+	)
+	menu.force_hover(0)
+	_assert(menu.activate_hovered(), "XR settings menu activates action row")
+	_assert(action["value"] == "restart_round", "XR settings menu emits restart action")
+	root.remove_child(menu)
+	menu.free()
 
 
 func _test_lan_discovery() -> void:
@@ -521,6 +581,14 @@ func _test_host_scene_smoke() -> void:
 	await process_frame
 	_assert(scene.simulation != null, "host scene creates simulation")
 	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_LOBBY, "host scene starts in lobby")
+	_assert(scene.settings_menu != null, "host scene creates settings menu")
+	scene.settings_menu.force_hover(2)
+	scene.settings_menu.activate_hovered()
+	_assert(absf(float(scene.config.get_value("seeker", "shot_cooldown_seconds", 0.0)) - 3.5) < 0.001, "host settings menu updates config")
+	var bot_count_before: int = scene.simulation.players.size()
+	scene.config.set_value("hiders", "bot_count", 3)
+	scene._reconcile_bot_hiders()
+	_assert(scene.simulation.players.size() == bot_count_before + 1, "host reconciles configured bot hider count")
 	scene._update_hud()
 	_assert(not scene.get_join_payload_text().is_empty(), "host scene creates join payload")
 	_assert(scene.get_join_payload_text().to_utf8_buffer().size() <= 106, "host join payload fits QR capacity")
@@ -590,6 +658,12 @@ func _test_mobile_scene_smoke() -> void:
 	_assert(scene.get_script() != null, "mobile hider script loads")
 	root.add_child(scene)
 	await process_frame
+	await process_frame
+	var menu_card: Control = scene.menu_panel.get_node("MenuCenter/MenuCard")
+	var viewport_center := root.get_visible_rect().size * 0.5
+	var card_center := menu_card.get_global_rect().get_center()
+	_assert(card_center.distance_to(viewport_center) < 3.0, "mobile lobby card is centered after layout")
+	_assert(menu_card.get_global_rect().position.x >= -1.0 and menu_card.get_global_rect().position.y >= -1.0, "mobile lobby card is not clipped offscreen")
 	# Pre-join disguise selection flows into the join request.
 	scene.selected_shape_index = scene.available_shapes.find("duck")
 	scene.selected_color_index = scene.available_colors.find("purple")

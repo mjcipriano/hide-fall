@@ -201,6 +201,13 @@ func confirm_room_setup() -> bool:
 	return true
 
 
+func end_round() -> bool:
+	if phase == PHASE_LOBBY or phase == PHASE_RESULTS:
+		return false
+	_finish_round()
+	return true
+
+
 func advance(delta: float) -> void:
 	server_tick += 1
 	phase_elapsed += delta

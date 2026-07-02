@@ -29,7 +29,8 @@
     "dash_enabled": true,
     "abilities_enabled": false,
     "cannot_move_while_held": true,
-    "bot_decision_seconds": 1.6
+    "bot_decision_seconds": 1.6,
+    "bot_count": 2
   },
   "network": {
     "max_hiders": 8,

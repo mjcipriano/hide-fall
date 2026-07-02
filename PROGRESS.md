@@ -639,10 +639,51 @@ User direction: stacking/twisting still not natural; make shapes/textures more i
 - Downloaded assets: `sha256sum -c` passed; `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 tools/verify_android_artifacts.sh` passed.
 - Released Quest APK smoke passed on hardware over wireless adb (one uninstall was needed because the headset had the locally debug-signed 0.3.0 smoke build; release installs will now install-over): `Hidefall visible gameplay ready ... objects=78 xr=OpenXR immersive passthrough`, `Hidefall LAN announcer broadcasting on udp/29445`, zero tonemapper/SCRIPT ERROR lines.
 
+## 2026-07-01 Session Plan: mobile layout fix + Quest wrist settings menu (v0.3.1)
+
+User feedback after v0.3.0: (a) on the phone the lobby menu renders in the bottom-right and is clipped — the Join button is not visible; (b) the Quest left hand should carry a nice, toggleable settings menu with all the configurable options plus restart/end-round actions; (c) the always-on controls help text in the seeker's view should move into that menu.
+
+### Root cause of the mobile layout bug
+
+`hider_client.gd` positioned the menu card with `set_anchors_preset(PRESET_CENTER)` followed by `position = ...` / `size = ...`. Assigning `position` converts to anchor offsets **using the parent's size at that moment** — during `_ready` the root control has not been laid out yet (size 0), so the computed offsets put the whole card into the bottom-right quadrant on the device. The in-game HUD (joystick, button stack, status line) had the same latent bug plus hard-coded 1280/720 constants.
+
+### Approach
+
+1. **Mobile layout (screen-size safe)**:
+   - `project.godot`: set `display/window/stretch/aspect="expand"` so odd phone aspect ratios render edge-to-edge; the logical canvas is always >= 1280x720, so anchor-based layouts fit every screen. XR path ignores window stretch, desktop keeps 1280x720.
+   - Menu: wrap the card in a full-rect `CenterContainer` (true centering at any resolution, no manual offsets).
+   - Game HUD: replace all `position` math with anchor presets + explicit `offset_*` values relative to the anchor (joystick bottom-left, action buttons bottom-right, status bottom-wide). Joystick touch zone reads `joystick_area.position/size` at runtime, which anchors keep correct.
+2. **GameConfig runtime settings**: add `set_value(section,key,value)`, `save_overrides(path)` (JSON to `user://hidefall_settings.json`), `apply_overrides(path)` (deep-merge onto defaults). Host applies overrides at startup and saves on every menu change; headless tests keep using pure `load_default()` plus explicit temp paths.
+3. **Simulation**: add `end_round()` (finishes an active round into results). Bot count becomes a setting (`hiders.bot_count`, default 2); the host reconciles bot players when it changes.
+4. **Quest settings menu** (`game/scripts/quest/seeker/xr_settings_menu.gd`, code-built Node3D, no scenes):
+   - Attached to the left controller (floats above the wrist like a hand tablet); on desktop it opens 1.2 m in front of the camera.
+   - Toggle: left-controller Y (`by_button`) in XR, `M` (new `toggle_menu` action) on desktop. The compact wrist stats panel hides while the menu is open.
+   - Rows: actions (`Restart round`, `End round`) then click-to-cycle settings (gun cooldown, prop count, hunt/blackout seconds, shape/color cooldowns, scan pulses, bot hiders). Clicking a setting row advances to the next value in a small preset list (wraps).
+   - Interaction: reuse the existing right-controller pointer ray. `update_pointer(origin, dir)` intersects the panel plane, highlights the hovered row; trigger (or A) activates it. While the pointer is over the open menu, shooting/grabbing is suppressed. Signals: `action_requested(action)`, `setting_changed(section, key, value)`.
+   - Help text: the full controls list lives at the bottom of the menu; the main HUD help line shrinks to a "Y / M: menu" hint.
+5. **Tests**: menu builds rows from config; pointer hit-test hovers the right row; activating a setting row cycles the config value; restart/end actions fire; config overrides save/load round-trip; mobile menu is centered (card global rect center ~= viewport center after a frame).
+6. Bump to 0.3.1 / code 10, build, smoke on Quest, release.
+
+### Status
+
+- Local implementation complete for v0.3.1:
+  - Mobile lobby now uses a full-rect `CenterContainer` and the in-game HUD uses anchor offsets instead of startup-time manual positions.
+  - `GameConfig` supports runtime `set_value`, deep-merged `apply_overrides`, and `save_overrides` to `user://hidefall_settings.json`.
+  - `hiders.bot_count` default is 2; host startup and setting changes reconcile bot hider players.
+  - `HidefallXrSettingsMenu` is a left-hand/desktop 3D settings panel with restart/end-round actions, click-to-cycle settings, right-pointer hover, and trigger/A activation.
+  - Main HUD help was reduced to menu hints; the full controls list lives inside the settings menu.
+  - Version pins are `0.3.1` / code `10`.
+- Local verification complete:
+  - `conda run -n hidefall make test` passes.
+  - Signed `make build-apks` passes using `/tmp/hidefall-upload-signing.env`.
+  - `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 conda run -n hidefall make verify-apks` passes.
+  - Quest hardware smoke passes over Windows ADB: `ADB=/mnt/c/Users/mcipr/AppData/Local/Android/Sdk/platform-tools/adb.exe HIDEFALL_QUEST_SMOKE_SECONDS=12 tools/quest_smoke_test.sh build/hidefall-quest.apk`; install-over succeeded and log shows `Hidefall visible gameplay ready ... objects=78 xr=OpenXR immersive passthrough`.
+
 ## Next
 
-1. Install `build/hidefall-mobile.apk` on an Android phone and verify: game auto-appears in the lobby list, tap-join works, pre-join disguise applies, the 3D world view tracks the round, and the joystick moves the prop camera-relative.
-2. Have the user put on the headset to feel-check the new settling (twist preservation, side-resting cans, slide-off), the new shapes/patterns, and the gun cooldown pacing (`seeker.shot_cooldown_seconds`).
-3. Commit/push, watch GitHub Actions, tag `v0.3.0`, verify release assets (sha256 + `tools/verify_android_artifacts.sh`), smoke-test the released Quest APK.
-4. Then discuss hider abilities (earthquake, quick sprint, decoy twitch...) — design hooks exist (`hiders.abilities_enabled`, `ability` field in hider_input is already accepted but unused).
-5. Known gaps: hiders themselves don't stack on props (they stay at floor height); Android broadcast reception can be flaky on some routers/devices (manual join is the fallback); iOS build path still untested.
+1. Commit and push the v0.3.1 implementation.
+2. Watch the GitHub Actions Test And Build workflow on `master`.
+3. Tag and push `v0.3.1`.
+4. Verify the GitHub Release attaches `hidefall-quest-0.3.1.apk`, `hidefall-mobile-0.3.1.apk`, and `SHA256SUMS`.
+5. Download the release assets, run `sha256sum -c`, run `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 tools/verify_android_artifacts.sh`, and smoke-test the released Quest APK.
+6. Still useful after release: install the mobile APK on an Android phone to verify Wi-Fi discovery/tap-join on real phone hardware; iOS remains untested.

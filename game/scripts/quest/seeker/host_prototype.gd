@@ -8,6 +8,9 @@ const QrCodeScript := preload("res://scripts/shared/qr/qr_code.gd")
 const WebSocketLanHostScript := preload("res://scripts/shared/networking/websocket_lan_host.gd")
 const LanGameAnnouncerScript := preload("res://scripts/shared/networking/lan_game_announcer.gd")
 const PropFactoryScript := preload("res://scripts/shared/props/prop_factory.gd")
+const XrSettingsMenuScript := preload("res://scripts/quest/seeker/xr_settings_menu.gd")
+
+const SETTINGS_PATH := "user://hidefall_settings.json"
 
 var simulation
 var content
@@ -30,6 +33,8 @@ var held_object_id := ""
 var trigger_was_pressed := false
 var grip_was_pressed := false
 var scan_was_pressed := false
+var menu_toggle_was_pressed := false
+var settings_menu_pointer_hovered := false
 var last_scan_text := "scan ready"
 var launch_gameplay_logged := false
 var held_prev_position := Vector3.ZERO
@@ -59,6 +64,7 @@ var xr_phase_label: Label3D
 var xr_blackout_panel: MeshInstance3D
 var xr_hand_menu_root: Node3D
 var xr_hand_menu_label: Label3D
+var settings_menu
 var world_environment: WorldEnvironment
 var arena_root: Node3D
 var object_root: Node3D
@@ -72,11 +78,13 @@ func _ready() -> void:
 	content.load_default()
 	config = GameConfigScript.new()
 	config.load_default()
+	if DisplayServer.get_name() != "headless":
+		config.apply_overrides(SETTINGS_PATH)
 	simulation = HidefallSimulationScript.new()
 	simulation.setup(config, content, 20260628)
 	host_ip = _detect_lan_ip()
 	local_hider_id = simulation.add_hider("Local Phone", false)
-	simulation.add_bot_hiders(2)
+	_reconcile_bot_hiders()
 	_build_world()
 	_build_hud()
 	_setup_audio()
@@ -93,6 +101,7 @@ func _process(delta: float) -> void:
 	_update_seeker_pose()
 	_update_held_object(delta)
 	_update_xr_pointer_dot()
+	_update_settings_menu_pointer()
 	simulation.advance(delta)
 	if _is_xr_active() and not launch_gameplay_logged and simulation.objects.size() > 0:
 		_log_visible_gameplay_state()
@@ -111,6 +120,19 @@ func _exit_tree() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("toggle_menu"):
+		_toggle_settings_menu()
+		get_viewport().set_input_as_handled()
+		return
+	if _is_settings_menu_open():
+		if event.is_action_pressed("shoot") or event.is_action_pressed("scan_pulse"):
+			if settings_menu != null:
+				settings_menu.activate_hovered()
+			get_viewport().set_input_as_handled()
+			return
+		if event.is_action_pressed("pickup") or event.is_action_released("pickup"):
+			get_viewport().set_input_as_handled()
+			return
 	if event.is_action_pressed("shoot"):
 		_shoot_at_cursor()
 	if event.is_action_pressed("pickup"):
@@ -236,7 +258,7 @@ func _build_hud() -> void:
 	help_label.position = Vector2(20, 580)
 	help_label.size = Vector2(900, 110)
 	help_label.add_theme_font_size_override("font_size", 16)
-	help_label.text = "R: start/confirm/rematch  |  Click/trigger: shoot  |  Hold E/grip: grab & turn, release to drop  |  Q/A: scan pulse  |  WASD local hider"
+	help_label.text = "M: settings menu  |  R: start/confirm/rematch  |  Click: shoot  |  Hold E: grab/drop  |  Q: scan  |  WASD local hider"
 	canvas.add_child(help_label)
 
 	crosshair = ColorRect.new()
@@ -256,6 +278,8 @@ func _build_hud() -> void:
 	if _is_xr_active():
 		canvas.visible = false
 		_build_xr_hud()
+	else:
+		_build_settings_menu()
 
 
 func _build_xr_hud() -> void:
@@ -311,7 +335,7 @@ func _build_xr_hud() -> void:
 	xr_help_label.position = Vector3(-0.68, -0.23, 0.01)
 	xr_help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	xr_help_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	xr_help_label.text = "Trigger shoot   Hold grip grab & turn   Release drop   A start / scan"
+	xr_help_label.text = "Y: settings menu   A: start / scan"
 	xr_hud_root.add_child(xr_help_label)
 
 	# A QR code inside the headset cannot be scanned by a phone, so the XR HUD
@@ -350,6 +374,7 @@ func _build_xr_hud() -> void:
 	xr_crosshair.material_override = crosshair_material
 	add_child(xr_crosshair)
 	_build_hand_menu()
+	_build_settings_menu()
 
 
 func _build_hand_menu() -> void:
@@ -380,6 +405,25 @@ func _build_hand_menu() -> void:
 	xr_hand_menu_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 	xr_hand_menu_label.modulate = Color(0.9, 1.0, 1.0, 1.0)
 	xr_hand_menu_root.add_child(xr_hand_menu_label)
+
+
+func _build_settings_menu() -> void:
+	if settings_menu != null:
+		return
+	settings_menu = XrSettingsMenuScript.new()
+	settings_menu.name = "XRSettingsMenu"
+	settings_menu.setup(config)
+	settings_menu.action_requested.connect(_on_settings_action_requested)
+	settings_menu.setting_changed.connect(_on_setting_changed)
+	if _is_xr_active() and left_controller != null:
+		settings_menu.position = Vector3(0.10, 0.20, -0.19)
+		settings_menu.rotation_degrees = Vector3(-58.0, 10.0, 0.0)
+		left_controller.add_child(settings_menu)
+	elif camera != null:
+		settings_menu.position = Vector3(0.0, -0.04, -1.25)
+		camera.add_child(settings_menu)
+	else:
+		add_child(settings_menu)
 
 
 func _hud_panel_material(color: Color) -> StandardMaterial3D:
@@ -521,13 +565,15 @@ func _update_hud() -> void:
 		xr_phase_label.text = _phase_instruction_text()
 	if xr_blackout_panel != null:
 		xr_blackout_panel.visible = simulation.phase == HidefallSimulationScript.PHASE_BLACKOUT
+	if settings_menu != null:
+		settings_menu.refresh_values()
 	_update_hand_menu()
 
 
 func _update_hand_menu() -> void:
 	if xr_hand_menu_root == null or xr_hand_menu_label == null:
 		return
-	xr_hand_menu_root.visible = left_controller != null and left_controller.get_is_active()
+	xr_hand_menu_root.visible = left_controller != null and left_controller.get_is_active() and not _is_settings_menu_open()
 	xr_hand_menu_label.text = "%s\nTime %.0f  Shots %d\nScans %d  Props %d\nRoom %s" % [
 		_phase_instruction_text(),
 		float(simulation.get_state_snapshot(local_hider_id)["time_remaining"]),
@@ -559,6 +605,8 @@ func _update_join_qr(join_payload: String) -> void:
 
 
 func _shoot_at_cursor() -> void:
+	if _is_settings_menu_open():
+		return
 	if not held_object_id.is_empty():
 		return
 	if simulation.phase != HidefallSimulationScript.PHASE_SEEK:
@@ -629,6 +677,8 @@ func _can_grab_phase() -> bool:
 
 
 func _begin_grab() -> void:
+	if _is_settings_menu_open():
+		return
 	if not held_object_id.is_empty():
 		return
 	if not _can_grab_phase():
@@ -671,6 +721,8 @@ func _end_grab() -> void:
 
 
 func _use_scan_pulse() -> void:
+	if _is_settings_menu_open():
+		return
 	var result: Dictionary = simulation.use_scan_pulse(camera.global_transform.origin)
 	if not result.get("accepted", false):
 		last_scan_text = String(result.get("reason", "unavailable"))
@@ -715,6 +767,14 @@ func _update_xr_pointer_dot() -> void:
 		return
 	var ray := _get_seeker_ray()
 	xr_crosshair.global_position = ray["origin"] + ray["direction"] * 1.4
+
+
+func _update_settings_menu_pointer() -> void:
+	if settings_menu == null or not _is_settings_menu_open():
+		settings_menu_pointer_hovered = false
+		return
+	var ray := _get_seeker_ray()
+	settings_menu_pointer_hovered = settings_menu.update_pointer(ray["origin"], ray["direction"])
 
 
 func _get_seeker_ray() -> Dictionary:
@@ -793,11 +853,25 @@ func _update_seeker_pose() -> void:
 
 
 func _handle_xr_controller_buttons() -> void:
+	var menu_pressed := left_controller != null and left_controller.get_is_active() and (
+		_xr_button_pressed(left_controller, "by_button", "secondary") or left_controller.is_button_pressed("y_button")
+	)
+	if menu_pressed and not menu_toggle_was_pressed:
+		_toggle_settings_menu()
+	menu_toggle_was_pressed = menu_pressed
 	if right_controller == null or not right_controller.get_is_active():
 		return
 	var trigger_pressed := _xr_button_pressed(right_controller, "trigger_click", "trigger")
 	var grip_pressed := _xr_button_pressed(right_controller, "grip_click", "grip")
 	var scan_pressed := _xr_button_pressed(right_controller, "ax_button", "primary")
+	if _is_settings_menu_open():
+		if (trigger_pressed and not trigger_was_pressed) or (scan_pressed and not scan_was_pressed):
+			if settings_menu != null:
+				settings_menu.activate_hovered()
+		trigger_was_pressed = trigger_pressed
+		grip_was_pressed = grip_pressed
+		scan_was_pressed = scan_pressed
+		return
 	if trigger_pressed and not trigger_was_pressed:
 		_shoot_at_cursor()
 	if grip_pressed and not grip_was_pressed:
@@ -831,6 +905,78 @@ func _activate_primary_action() -> void:
 		HidefallSimulationScript.PHASE_RESULTS:
 			simulation.start_round()
 			_rebuild_objects()
+
+
+func _restart_round_from_settings() -> void:
+	if not held_object_id.is_empty():
+		_end_grab()
+	if simulation.start_round():
+		simulation.confirm_room_setup()
+		_rebuild_objects()
+		network_status = "round restarted"
+		last_scan_text = "settings restart"
+
+
+func _end_round_from_settings() -> void:
+	if not held_object_id.is_empty():
+		_end_grab()
+	if simulation.end_round():
+		network_status = "round ended from menu"
+	else:
+		network_status = "no active round to end"
+	_update_hud()
+
+
+func _toggle_settings_menu() -> void:
+	if settings_menu == null:
+		_build_settings_menu()
+	if settings_menu == null:
+		return
+	if not _is_xr_active() and camera != null and settings_menu.get_parent() == camera:
+		settings_menu.position = Vector3(0.0, -0.04, -1.25)
+	settings_menu.toggle()
+	if settings_menu.visible:
+		settings_menu.refresh_values()
+
+
+func _is_settings_menu_open() -> bool:
+	return settings_menu != null and settings_menu.visible
+
+
+func _on_settings_action_requested(action: String) -> void:
+	match action:
+		"restart_round":
+			_restart_round_from_settings()
+		"end_round":
+			_end_round_from_settings()
+
+
+func _on_setting_changed(section: String, key: String, _value: Variant) -> void:
+	if DisplayServer.get_name() != "headless":
+		config.save_overrides(SETTINGS_PATH)
+	if section == "hiders" and key == "bot_count":
+		_reconcile_bot_hiders()
+	elif section == "objects" and key == "decoy_count" and simulation.phase == HidefallSimulationScript.PHASE_LOBBY:
+		simulation.objects.clear()
+		_rebuild_objects()
+	_refresh_announcer_info(int(config.get_value("network", "port", 29444)))
+	_update_hud()
+
+
+func _reconcile_bot_hiders() -> void:
+	if simulation == null or config == null:
+		return
+	var desired: int = maxi(0, int(config.get_value("hiders", "bot_count", 2)))
+	var bot_ids: Array[String] = []
+	for player_id in simulation.players:
+		if simulation.players[player_id].get("role", "") == "hider" and simulation.players[player_id].get("is_bot", false):
+			bot_ids.append(player_id)
+	while bot_ids.size() > desired:
+		var bot_id: String = bot_ids.pop_back()
+		simulation.remove_player(bot_id, true)
+	while bot_ids.size() < desired:
+		var added: Array[String] = simulation.add_bot_hiders(1)
+		bot_ids.append(added[0])
 
 
 func _start_visible_solo_round() -> void:

@@ -614,13 +614,16 @@ func _build_menu() -> void:
 	menu_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(menu_panel)
 
+	var center := CenterContainer.new()
+	center.name = "MenuCenter"
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	menu_panel.add_child(center)
+
 	var card := PanelContainer.new()
 	card.name = "MenuCard"
-	card.set_anchors_preset(Control.PRESET_CENTER)
-	card.position = Vector2(140, 30)
-	card.size = Vector2(1000, 660)
+	card.custom_minimum_size = Vector2(1000, 660)
 	card.add_theme_stylebox_override("panel", _panel_style())
-	menu_panel.add_child(card)
+	center.add_child(card)
 
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 28)
@@ -798,6 +801,10 @@ func _build_game_ui() -> void:
 
 	top_bar = PanelContainer.new()
 	top_bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	top_bar.offset_left = 16.0
+	top_bar.offset_top = 12.0
+	top_bar.offset_right = -16.0
+	top_bar.offset_bottom = 68.0
 	top_bar.custom_minimum_size = Vector2(0, 56)
 	top_bar.add_theme_stylebox_override("panel", _panel_style(10))
 	top_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -831,15 +838,19 @@ func _build_game_ui() -> void:
 	joystick_area = Control.new()
 	joystick_area.name = "Joystick"
 	joystick_area.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	joystick_area.position = Vector2(40, 720 - 300)
-	joystick_area.size = Vector2(260, 260)
+	joystick_area.offset_left = 40.0
+	joystick_area.offset_top = -300.0
+	joystick_area.offset_right = 300.0
+	joystick_area.offset_bottom = -40.0
 	joystick_area.draw.connect(_draw_joystick)
 	game_panel.add_child(joystick_area)
 
 	var buttons := VBoxContainer.new()
 	buttons.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	buttons.position = Vector2(1280 - 220, 720 - 330)
-	buttons.size = Vector2(180, 300)
+	buttons.offset_left = -220.0
+	buttons.offset_top = -330.0
+	buttons.offset_right = -40.0
+	buttons.offset_bottom = -30.0
 	buttons.add_theme_constant_override("separation", 12)
 	game_panel.add_child(buttons)
 
@@ -875,8 +886,10 @@ func _build_game_ui() -> void:
 
 	game_status_label = Label.new()
 	game_status_label.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	game_status_label.position = Vector2(340, 720 - 40)
-	game_status_label.size = Vector2(600, 30)
+	game_status_label.offset_left = 340.0
+	game_status_label.offset_top = -40.0
+	game_status_label.offset_right = -340.0
+	game_status_label.offset_bottom = -10.0
 	game_status_label.add_theme_font_size_override("font_size", 15)
 	game_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	game_panel.add_child(game_status_label)
@@ -916,10 +929,10 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _begin_pointer(index: int, position_value: Vector2) -> void:
-	var joystick_rect := Rect2(joystick_area.position - Vector2(40, 40), joystick_area.size + Vector2(80, 80))
+	var joystick_rect := joystick_area.get_global_rect().grow(40.0)
 	if joystick_rect.has_point(position_value) and joystick_drag_index == -1:
 		joystick_drag_index = index
-		joystick_center = joystick_area.position + joystick_area.size * 0.5
+		joystick_center = joystick_area.get_global_rect().get_center()
 		_update_joystick_from(position_value)
 	elif cam_drag_index == -1:
 		cam_drag_index = index
