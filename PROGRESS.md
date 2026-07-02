@@ -859,6 +859,19 @@ User reported that starting from the left-hand menu did not start the game, and 
   - `aapt dump badging` confirmed both local APKs have `versionName=0.3.5` and `versionCode=14`.
   - `make smoke-quest-apk` passed on Quest over wireless adb `192.168.0.253:5555`; marker: `Hidefall visible world pending: phase=lobby objects=0 object_nodes=0 xr=OpenXR immersive passthrough network=listening`; LAN announcer started on udp/29445; zero tonemapper/SCRIPT ERROR/fatal crash markers; same known generic-controller OpenXR warning only.
 
+## 2026-07-02 v0.3.5 Release Verification
+
+- Committed and pushed `4a1d6ff` (`Release v0.3.5 wrist menu start fixes`) to `master`.
+- Tagged and pushed `v0.3.5`.
+- GitHub Actions passed:
+  - Release run `28606360520`.
+  - Tag Test And Build run `28606360519`.
+  - Master Test And Build run `28606348912`.
+- GitHub Release `Hidefall 0.3.5` published with `hidefall-quest-0.3.5.apk`, `hidefall-mobile-0.3.5.apk`, and `SHA256SUMS`: https://github.com/mjcipriano/hide-fall/releases/tag/v0.3.5
+- Downloaded assets to `/tmp/hidefall-release-v0.3.5`; `sha256sum -c SHA256SUMS` passed.
+- `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 tools/verify_android_artifacts.sh /tmp/hidefall-release-v0.3.5/hidefall-quest-0.3.5.apk /tmp/hidefall-release-v0.3.5/hidefall-mobile-0.3.5.apk` passed.
+- Released Quest APK smoke passed over wireless adb `192.168.0.253:5555` after uninstalling the locally debug-signed package once; install, launch, process check, and log checks passed. Smoke log: `build/quest-smoke/quest-smoke-logcat.txt`.
+
 ## Next
 
 1. Install `hidefall-mobile-0.3.4.apk` on the Android phone and verify in a real round: fullscreen, snappy joystick, Dash, Mimic, Quake (props fly + rumble on the headset), Ping (seeker hears your jingle from your prop), and the endless-hiders respawn flash.
