@@ -51,6 +51,7 @@ func _run() -> void:
 	_test_rest_modes()
 	_test_thrown_prop_tumbles()
 	_test_shot_cooldown()
+	_test_hider_dash_and_mimic()
 	_test_end_round()
 	_test_hider_preferences()
 	_test_prop_factory()
@@ -450,6 +451,42 @@ func _test_shot_cooldown() -> void:
 	_assert(sim.get_state_snapshot().has("shot_cooldown_remaining"), "snapshot exposes the gun cooldown")
 
 
+func _test_hider_dash_and_mimic() -> void:
+	var sim = _new_sim(607)
+	var player_id := sim.add_hider("Dasher")
+	sim.start_round()
+	sim.confirm_room_setup()
+	_advance_for(sim, 20.4)
+	var object_id: String = sim.players[player_id]["object_id"]
+	var hider: Dictionary = sim.objects[object_id]
+	hider["position"] = Vector3.ZERO
+	hider["velocity"] = Vector3.ZERO
+	sim.objects[object_id] = hider
+	var dash_input := {
+		"move": [1.0, 0.0],
+		"ability": "dash"
+	}
+	_assert(sim.apply_hider_input(player_id, dash_input), "dash hider input is accepted")
+	_advance_for(sim, 0.12)
+	_assert((sim.objects[object_id]["position"] as Vector3).x > 0.45, "dash slingshots hider forward quickly")
+	_assert(float(sim.get_hider_cooldowns(player_id).get("dash", 0.0)) > 0.0, "dash cooldown is exposed")
+	var decoy_id: String = sim.get_decoy_object_ids()[0]
+	var decoy: Dictionary = sim.objects[decoy_id]
+	decoy["position"] = sim.objects[object_id]["position"] + Vector3(0.2, 0.0, 0.0)
+	decoy["shape"] = "duck"
+	decoy["color"] = "purple"
+	decoy["pattern"] = "stripes"
+	sim.objects[decoy_id] = decoy
+	var before_mimic: Dictionary = sim.objects[object_id]
+	before_mimic["mimic_cooldown"] = 0.0
+	sim.objects[object_id] = before_mimic
+	_assert(sim.apply_hider_input(player_id, {"move": [0.0, 0.0], "ability": "mimic"}), "mimic hider input is accepted")
+	_assert(sim.objects[object_id]["shape"] == "duck", "mimic copies adjacent object shape")
+	_assert(sim.objects[object_id]["color"] == "purple", "mimic copies adjacent object color")
+	_assert(sim.objects[object_id]["pattern"] == "stripes", "mimic copies adjacent object pattern")
+	_assert(float(sim.get_hider_cooldowns(player_id).get("mimic", 0.0)) > 0.0, "mimic cooldown is exposed")
+
+
 func _test_end_round() -> void:
 	var sim = _new_sim(606)
 	sim.add_bot_hiders(1)
@@ -467,6 +504,7 @@ func _test_hider_preferences() -> void:
 	sim.set_player_preferences(player_id, {"shape": "not_a_shape"})
 	sim.start_round()
 	var object_id: String = sim.players[player_id]["object_id"]
+	_assert((sim.objects[object_id]["position"] as Vector3).y > 1.0, "hider starts in the ceiling drop with decoys")
 	_assert(sim.objects[object_id]["shape"] == "duck", "preferred shape is used at spawn")
 	_assert(sim.objects[object_id]["color"] == "purple", "preferred color is used at spawn")
 	_assert(sim.objects[object_id]["pattern"] == "stripes", "preferred pattern is used at spawn")
@@ -596,6 +634,45 @@ func _test_host_scene_smoke() -> void:
 	scene._start_visible_solo_round()
 	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_OBJECT_RAIN, "host scene can start a visible solo round")
 	_assert(scene.object_nodes.size() >= 75, "visible solo round creates prop nodes immediately")
+	var takeover_host := FakeNetworkHost.new()
+	scene.network_host = takeover_host
+	scene._handle_join_request(99, {
+		"type": "join_request",
+		"version": 1,
+		"room_id": "842913",
+		"token": "hidefall",
+		"player_name": "Phone Join",
+		"preferred_shape": "duck",
+		"preferred_color": "purple",
+		"preferred_pattern": "stripes"
+	})
+	var takeover_id: String = scene.peer_to_player.get(99, "")
+	_assert(not takeover_id.is_empty(), "active round join takes over a bot hider")
+	_assert(not scene.simulation.players[takeover_id].get("is_bot", true), "taken-over hider is no longer a bot")
+	_assert(takeover_host.sent[0]["message"]["type"] == "join_accepted" and not takeover_host.sent[0]["message"]["spectator"], "active round bot takeover joins as playable hider")
+	var takeover_object_id: String = scene.simulation.players[takeover_id]["object_id"]
+	_assert(scene.simulation.objects[takeover_object_id]["shape"] == "duck", "bot takeover applies chosen shape to existing hider")
+	scene.peer_to_player.erase(99)
+	scene.simulation.remove_player(takeover_id, true)
+	for player_id in scene.simulation.players.keys():
+		if scene.simulation.players[player_id].get("is_bot", false):
+			scene.simulation.remove_player(player_id, true)
+	var decoy_takeover_host := FakeNetworkHost.new()
+	scene.network_host = decoy_takeover_host
+	scene._handle_join_request(100, {
+		"type": "join_request",
+		"version": 1,
+		"room_id": "842913",
+		"token": "hidefall",
+		"player_name": "Late Decoy"
+	})
+	var decoy_takeover_id: String = scene.peer_to_player.get(100, "")
+	_assert(not decoy_takeover_id.is_empty(), "active round join can take over a decoy when no bot is available")
+	_assert(not decoy_takeover_host.sent[0]["message"]["spectator"], "decoy takeover joins as playable hider")
+	var decoy_object_id: String = scene.simulation.players[decoy_takeover_id]["object_id"]
+	_assert(scene.simulation.objects[decoy_object_id]["is_hider"], "decoy takeover converts the body into a hider")
+	scene.peer_to_player.erase(100)
+	scene.simulation.remove_player(decoy_takeover_id, true)
 	scene.simulation._set_phase(HidefallSimulationScript.PHASE_LOBBY)
 	scene.simulation.objects.clear()
 	scene._rebuild_objects()
@@ -629,7 +706,9 @@ func _test_host_scene_smoke() -> void:
 		"token": "hidefall",
 		"player_name": "Late"
 	})
-	_assert(fake_host.sent[-2]["message"]["type"] == "join_accepted" and fake_host.sent[-2]["message"]["spectator"], "host accepts default late join as spectator")
+	var late_player_id: String = scene.peer_to_player.get(8, "")
+	_assert(fake_host.sent[-2]["message"]["type"] == "join_accepted" and not fake_host.sent[-2]["message"]["spectator"], "host accepts default late join as playable takeover")
+	_assert(not late_player_id.is_empty() and not String(scene.simulation.players[late_player_id].get("object_id", "")).is_empty(), "late playable join owns a hider body")
 	scene._rebuild_objects()
 	_assert(scene.object_nodes.size() >= 75, "host scene creates visible prop nodes")
 	var ray: Dictionary = scene._get_seeker_ray()
@@ -696,6 +775,12 @@ func _test_mobile_scene_smoke() -> void:
 	_assert(NetworkMessageValidatorScript.validate_client_message(input).is_empty(), "mobile scene builds valid hider input")
 	_assert(input["request_color"] == "blue", "mobile color button queues color request")
 	_assert(input["request_shape"] == "sphere", "mobile shape button queues shape request")
+	scene._request_dash()
+	var dash_input: Dictionary = scene.build_hider_input()
+	_assert(dash_input["ability"] == "dash", "mobile dash button queues dash ability")
+	scene._request_mimic()
+	var mimic_input: Dictionary = scene.build_hider_input()
+	_assert(mimic_input["ability"] == "mimic", "mobile mimic button queues mimic ability")
 	scene.apply_snapshot({
 		"type": "state_snapshot",
 		"version": 1,

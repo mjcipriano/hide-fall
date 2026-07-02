@@ -721,7 +721,46 @@ User feedback after v0.3.0: (a) on the phone the lobby menu renders in the botto
 
 ## Next
 
-1. Install `hidefall-mobile-0.3.1.apk` on an Android phone and verify real-device Wi-Fi discovery/tap-join, pre-join disguise selection, and in-round 3D world controls.
+1. ~~Install `hidefall-mobile-0.3.1.apk` on an Android phone and verify real-device Wi-Fi discovery/tap-join, pre-join disguise selection, and in-round 3D world controls.~~ User tested and reported fullscreen/control issues; superseded by v0.3.2 work below.
 2. In headset, feel-check the new Y/M settings menu ergonomics and pointer activation; adjust row spacing/angle if the wrist pose is uncomfortable.
 3. Non-blocking cleanup: update GitHub Actions setup-miniconda options to remove `auto-activate-base` and implicit `defaults` channel annotations.
 4. iOS build path remains untested.
+
+## 2026-07-01 v0.3.2 Mobile Controls / Lobby Startup Pass
+
+User feedback after v0.3.1:
+
+- Mobile should be true fullscreen because Android phone nav/status UI obstructs controls.
+- After joining, mobile joystick/buttons did not move or act.
+- Replace the unclear `FREEZE` button with `DASH`.
+- Add `MIMIC`, which copies an adjacent decoy's shape/color/pattern instantly.
+- Quest startup order should be lobby-first: empty room, configure settings/bots, allow players to join, then start a round from the menu. On round start, hiders/bots/decoys all drop from the ceiling. Late joiners should take over a bot or decoy body.
+
+Implemented for v0.3.2 / code 11:
+
+- Mobile preset now exports immersive fullscreen and the mobile scene requests fullscreen/keep-screen-on at runtime.
+- Mobile joystick now owns its own touch/mouse input (`gui_input`) instead of relying on the root control receiving events through the 3D viewport and button layers.
+- Mobile `FREEZE` button replaced with `DASH`; added `MIMIC` button. Both send one-shot `ability` values in `hider_input`.
+- Simulation supports dash with configurable speed/duration/cooldown and mimic with configurable radius/cooldown.
+- Hider cooldown snapshots now include `dash` and `mimic`, and the phone HUD/buttons show/disable during cooldowns.
+- Quest no longer auto-starts a solo bot round. Startup stays in an empty lobby (`objects=0`) while the wrist menu/settings are available.
+- Wrist menu action label is now `Start / restart round`; it starts the round after configuration.
+- Round spawn now drops hiders, bots, and decoys from the ceiling during object rain.
+- Active late joins first take over an alive bot hider; if none is available, the host converts an alive decoy body into the joining player's hider.
+- Network validator now accepts optional string `ability` fields.
+- Quest smoke test now expects the lobby-first startup marker.
+
+Local verification:
+
+- `conda run -n hidefall make test` passes, including new tests for dash, mimic, hider ceiling spawn, mobile ability requests, active bot takeover, and decoy takeover.
+- Signed `make build-apks` passes using `/tmp/hidefall-upload-signing.env`; mobile export log includes `--fullscreen`.
+- `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 conda run -n hidefall make verify-apks` passes.
+- Quest hardware smoke passes over Windows ADB with one USB transport: `ADB=/mnt/c/Users/mcipr/AppData/Local/Android/Sdk/platform-tools/adb.exe HIDEFALL_QUEST_SMOKE_SECONDS=12 tools/quest_smoke_test.sh build/hidefall-quest.apk`; install-over succeeded and log shows `Hidefall visible world pending: phase=lobby objects=0 object_nodes=0 xr=OpenXR immersive passthrough network=listening`.
+
+## Next
+
+1. Commit/push v0.3.2, watch `master` Test And Build, tag `v0.3.2`, verify release assets/checksums/APK contents, and smoke-test the released Quest APK.
+2. Install `hidefall-mobile-0.3.2.apk` on the Android phone and verify fullscreen, joystick movement, Dash, and Mimic in a real joined round.
+3. In headset, validate that lobby-first flow plus wrist-menu start feels correct and that late phone joins take over bots/decoys as expected.
+4. Non-blocking cleanup: update GitHub Actions setup-miniconda options to remove `auto-activate-base` and implicit `defaults` channel annotations.
+5. iOS build path remains untested.

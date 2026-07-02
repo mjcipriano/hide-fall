@@ -126,8 +126,8 @@ if [[ -n "${godot_errors}" ]]; then
 	exit 1
 fi
 
-if ! grep -Eq 'Hidefall visible gameplay ready: phase=.*objects=[1-9][0-9]+' "${LOG_FILE}"; then
-	echo "Quest smoke failed: no visible Hidefall gameplay marker with spawned objects was found in ${LOG_FILE}" >&2
+if ! grep -Eq 'Hidefall visible world pending: phase=lobby objects=0 object_nodes=0' "${LOG_FILE}"; then
+	echo "Quest smoke failed: no lobby-first Hidefall startup marker was found in ${LOG_FILE}" >&2
 	grep -Ein 'Hidefall visible (gameplay ready|world pending)|OpenXR|passthrough|phase=|objects=' "${LOG_FILE}" >&2 || true
 	exit 1
 fi

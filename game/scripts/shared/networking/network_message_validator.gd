@@ -20,6 +20,7 @@ static func validate_client_message(message: Dictionary) -> Array[String]:
 			_require_string(message, "player_id", errors)
 			if not message.get("move", null) is Array or message["move"].size() != 2:
 				errors.append("hider_input.move must be a 2-item array")
+			_optional_string(message, "ability", errors)
 		"ready_state":
 			_require_string(message, "player_id", errors)
 			if not message.get("ready", null) is bool:
@@ -54,4 +55,3 @@ static func _require_string(message: Dictionary, key: String, errors: Array[Stri
 static func _optional_string(message: Dictionary, key: String, errors: Array[String]) -> void:
 	if message.has(key) and message[key] != null and not message[key] is String:
 		errors.append("%s must be a string when present" % key)
-

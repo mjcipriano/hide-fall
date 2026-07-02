@@ -111,7 +111,7 @@ func refresh_values() -> void:
 
 func _build_rows() -> void:
 	rows = [
-		{"type": "action", "label": "Restart round", "action": "restart_round"},
+		{"type": "action", "label": "Start / restart round", "action": "restart_round"},
 		{"type": "action", "label": "End round", "action": "end_round"},
 		{"type": "setting", "label": "Gun cooldown", "section": "seeker", "key": "shot_cooldown_seconds", "values": [0.5, 1.0, 1.5, 2.5, 3.5, 5.0], "suffix": "s"},
 		{"type": "setting", "label": "Prop count", "section": "objects", "key": "decoy_count", "values": [30, 50, 75, 100, 125], "suffix": ""},

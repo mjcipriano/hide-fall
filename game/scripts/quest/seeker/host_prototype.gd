@@ -88,8 +88,6 @@ func _ready() -> void:
 	_build_world()
 	_build_hud()
 	_setup_audio()
-	if _should_auto_start_solo_round():
-		_start_visible_solo_round()
 	if auto_start_network:
 		_start_network_host()
 	_log_visible_gameplay_state()
@@ -192,7 +190,7 @@ func _build_world() -> void:
 
 	var start_hint := Label3D.new()
 	start_hint.name = "ArenaHint"
-	start_hint.text = "A starts the hunt. Trigger shoots. Grip picks up props."
+	start_hint.text = "Open the wrist menu to configure and start a round."
 	start_hint.font_size = 32
 	start_hint.outline_size = 8
 	start_hint.pixel_size = 0.0024
@@ -894,10 +892,7 @@ func _xr_button_pressed(controller: XRController3D, button_name: String, axis_na
 func _activate_primary_action() -> void:
 	match simulation.phase:
 		HidefallSimulationScript.PHASE_LOBBY:
-			if simulation.start_round():
-				_rebuild_objects()
-			else:
-				network_status = "waiting for ready players"
+			network_status = "open the wrist menu to start"
 		HidefallSimulationScript.PHASE_ROOM_SETUP:
 			simulation.confirm_room_setup()
 		HidefallSimulationScript.PHASE_SEEK:
@@ -991,13 +986,7 @@ func _start_visible_solo_round() -> void:
 
 
 func _should_auto_start_solo_round() -> bool:
-	if not _is_xr_active():
-		return false
-	if OS.get_environment("HIDEFALL_QUEST_STAY_IN_LOBBY") == "1":
-		return false
-	if OS.get_environment("HIDEFALL_DISABLE_SOLO_AUTOSTART") == "1":
-		return false
-	return true
+	return false
 
 
 func _is_xr_active() -> bool:
@@ -1266,15 +1255,23 @@ func _handle_join_request(peer_id: int, message: Dictionary) -> void:
 	var player_name := String(message.get("player_name", "Hider")).strip_edges()
 	if player_name.is_empty():
 		player_name = "Hider"
-	var late_spectator: bool = simulation.phase != HidefallSimulationScript.PHASE_LOBBY and not bool(config.get_value("network", "allow_late_join", false))
-	var player_id: String = simulation.add_spectator(player_name) if late_spectator else simulation.add_hider(player_name, false)
-	if not late_spectator:
-		simulation.set_player_ready(player_id, false)
-	simulation.set_player_preferences(player_id, {
+	var preferences := {
 		"shape": String(message.get("preferred_shape", "") if message.get("preferred_shape", null) != null else ""),
 		"color": String(message.get("preferred_color", "") if message.get("preferred_color", null) != null else ""),
 		"pattern": String(message.get("preferred_pattern", "") if message.get("preferred_pattern", null) != null else "")
-	})
+	}
+	var late_join: bool = simulation.phase != HidefallSimulationScript.PHASE_LOBBY
+	var late_spectator: bool = late_join and not bool(config.get_value("network", "allow_late_join", false))
+	var player_id := ""
+	if late_spectator:
+		player_id = _take_over_available_body(player_name, preferences)
+		if player_id.is_empty():
+			player_id = simulation.add_spectator(player_name)
+	else:
+		player_id = simulation.add_hider(player_name, false)
+		simulation.set_player_ready(player_id, false)
+		simulation.set_player_preferences(player_id, preferences)
+	late_spectator = simulation.players[player_id].get("role", "") == "spectator"
 	peer_to_player[peer_id] = player_id
 	network_host.send_to_peer(peer_id, {
 		"type": "join_accepted",
@@ -1288,6 +1285,64 @@ func _handle_join_request(peer_id: int, message: Dictionary) -> void:
 		"patterns": content.get_pattern_ids()
 	})
 	network_host.send_to_peer(peer_id, simulation.get_state_snapshot(player_id))
+
+
+func _take_over_available_body(player_name: String, preferences: Dictionary) -> String:
+	for player_id in simulation.players:
+		var player: Dictionary = simulation.players[player_id]
+		if player.get("role", "") != "hider" or not player.get("is_bot", false):
+			continue
+		if not player.get("alive", false):
+			continue
+		var object_id: String = player.get("object_id", "")
+		if object_id.is_empty() or not simulation.objects.has(object_id):
+			continue
+		player["name"] = player_name
+		player["is_bot"] = false
+		player["ready"] = true
+		simulation.players[player_id] = player
+		simulation.set_player_preferences(player_id, preferences)
+		_apply_preferences_to_existing_hider(object_id, preferences)
+		return player_id
+	for object_id in simulation.objects:
+		var obj: Dictionary = simulation.objects[object_id]
+		if obj.get("is_hider", false) or not obj.get("alive", true):
+			continue
+		var player_id: String = simulation.add_hider(player_name, false)
+		simulation.players[player_id]["ready"] = true
+		simulation.players[player_id]["object_id"] = object_id
+		simulation.set_player_preferences(player_id, preferences)
+		obj["is_hider"] = true
+		obj["owner_player_id"] = player_id
+		obj["move_input"] = Vector2.ZERO
+		obj["freeze"] = false
+		obj["alive"] = true
+		obj["shape_cooldown"] = 0.0
+		obj["color_cooldown"] = 0.0
+		obj["dash_cooldown"] = 0.0
+		obj["dash_time"] = 0.0
+		obj["mimic_cooldown"] = 0.0
+		simulation.objects[object_id] = obj
+		_apply_preferences_to_existing_hider(object_id, preferences)
+		return player_id
+	return ""
+
+
+func _apply_preferences_to_existing_hider(object_id: String, preferences: Dictionary) -> void:
+	var obj: Dictionary = simulation.objects[object_id]
+	var shape := String(preferences.get("shape", ""))
+	if content.get_shape_ids().has(shape):
+		obj["shape"] = shape
+		obj["rest_mode"] = content.get_shape_rest_mode(shape)
+		obj["collision_radius"] = simulation._collision_radius_for_shape(shape)
+		obj["half_height"] = simulation._half_height_for_shape(shape)
+	var color := String(preferences.get("color", ""))
+	if content.get_color_ids().has(color):
+		obj["color"] = color
+	var pattern := String(preferences.get("pattern", ""))
+	if content.get_pattern_ids().has(pattern):
+		obj["pattern"] = pattern
+	simulation.objects[object_id] = obj
 
 
 func _send_periodic_snapshots(delta: float) -> void:

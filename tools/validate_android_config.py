@@ -6,8 +6,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 EXPORT_PRESETS = ROOT / "game" / "export_presets.cfg"
 PROJECT = ROOT / "game" / "project.godot"
-EXPECTED_VERSION = "0.3.1"
-EXPECTED_VERSION_CODE = "10"
+EXPECTED_VERSION = "0.3.2"
+EXPECTED_VERSION_CODE = "11"
 
 
 def main() -> None:
@@ -15,6 +15,8 @@ def main() -> None:
     project_text = PROJECT.read_text(encoding="utf-8")
     require(f'version/name="{EXPECTED_VERSION}"', export_text, f"Android version name is {EXPECTED_VERSION}")
     require(f"version/code={EXPECTED_VERSION_CODE}", export_text, f"Android version code is {EXPECTED_VERSION_CODE}")
+    if export_text.count("screen/immersive_mode=true") < 2:
+        raise SystemExit("android export config validation failed: Quest and mobile presets must both be fullscreen immersive")
     require('exclude_filter=""', export_text, "Quest preset packages OpenXR Vendors addon resources")
     require("xr_features/xr_mode=1", export_text, "Quest preset exports OpenXR")
     require("xr_features/enable_meta_plugin=true", export_text, "Quest preset packages the Meta OpenXR vendor plugin")

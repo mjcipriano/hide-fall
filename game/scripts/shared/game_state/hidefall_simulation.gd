@@ -268,6 +268,12 @@ func apply_hider_input(player_id: String, input: Dictionary) -> bool:
 		_try_change_shape(obj, input["request_shape"])
 	if input.get("request_color", null) is String:
 		_try_change_color(obj, input["request_color"])
+	if input.get("ability", null) is String:
+		match String(input["ability"]):
+			"dash":
+				_try_dash(obj, move)
+			"mimic":
+				_try_mimic(obj)
 
 	objects[object_id] = obj
 	return true
@@ -608,7 +614,9 @@ func get_hider_cooldowns(player_id: String) -> Dictionary:
 	var obj: Dictionary = objects[object_id]
 	return {
 		"shape": float(obj.get("shape_cooldown", 0.0)),
-		"color": float(obj.get("color_cooldown", 0.0))
+		"color": float(obj.get("color_cooldown", 0.0)),
+		"dash": float(obj.get("dash_cooldown", 0.0)),
+		"mimic": float(obj.get("mimic_cooldown", 0.0))
 	}
 
 
@@ -696,7 +704,7 @@ func _create_object(is_hider: bool, owner_player_id: String, overrides: Dictiona
 	_next_object_index += 1
 	var angle := rng.randf_range(0.0, TAU)
 	var radius := sqrt(rng.randf()) * play_radius
-	var y := float(config.get_value("objects", "spawn_height_meters", 2.5)) if not is_hider else 0.15
+	var y := float(config.get_value("objects", "spawn_height_meters", 2.5))
 	var position := Vector3(cos(angle) * radius, y, sin(angle) * radius)
 	var shape: String = content.pick_weighted_shape(rng)
 	if _shape_ids.has(String(overrides.get("shape", ""))):
@@ -732,6 +740,10 @@ func _create_object(is_hider: bool, owner_player_id: String, overrides: Dictiona
 		"damaged": false,
 		"shape_cooldown": 0.0,
 		"color_cooldown": 0.0,
+		"dash_cooldown": 0.0,
+		"dash_time": 0.0,
+		"dash_direction": Vector2.ZERO,
+		"mimic_cooldown": 0.0,
 		"alive_time": 0.0,
 		"freeze_near_seconds": 0.0,
 		"close_calls": 0,
@@ -765,8 +777,6 @@ func _update_bot_inputs(delta: float) -> void:
 func _integrate_object_rain(delta: float) -> void:
 	for object_id in objects:
 		var obj: Dictionary = objects[object_id]
-		if obj.get("is_hider", false):
-			continue
 		var velocity: Vector3 = obj["velocity"]
 		velocity.y -= 9.8 * delta
 		var position: Vector3 = obj["position"] + velocity * delta
@@ -791,6 +801,8 @@ func _integrate_hider_motion(delta: float) -> void:
 			continue
 		obj["shape_cooldown"] = max(0.0, float(obj["shape_cooldown"]) - delta)
 		obj["color_cooldown"] = max(0.0, float(obj["color_cooldown"]) - delta)
+		obj["dash_cooldown"] = max(0.0, float(obj.get("dash_cooldown", 0.0)) - delta)
+		obj["mimic_cooldown"] = max(0.0, float(obj.get("mimic_cooldown", 0.0)) - delta)
 		var airborne: bool = obj["position"].y > 0.151
 		if obj.get("freeze", false) and not airborne:
 			obj["velocity"] = Vector3.ZERO
@@ -799,13 +811,22 @@ func _integrate_hider_motion(delta: float) -> void:
 		else:
 			var move: Vector2 = Vector2.ZERO if airborne else obj.get("move_input", Vector2.ZERO)
 			var speed := float(config.get_value("hiders", "movement_speed", 1.0))
-			var acceleration := Vector3(move.x, 0.0, move.y) * speed * 4.0
 			var velocity: Vector3 = obj["velocity"]
-			velocity.x = (velocity.x + acceleration.x * delta) * 0.88
-			velocity.z = (velocity.z + acceleration.z * delta) * 0.88
-			var planar := Vector2(velocity.x, velocity.z).limit_length(2.4 * speed)
-			velocity.x = planar.x
-			velocity.z = planar.y
+			if float(obj.get("dash_time", 0.0)) > 0.0 and not airborne:
+				var dash_direction: Vector2 = obj.get("dash_direction", Vector2.ZERO)
+				if dash_direction.length() > 0.01:
+					var dash_speed := float(config.get_value("hiders", "dash_speed", 7.0))
+					velocity.x = dash_direction.x * dash_speed
+					velocity.z = dash_direction.y * dash_speed
+					obj["dash_time"] = max(0.0, float(obj.get("dash_time", 0.0)) - delta)
+			else:
+				obj["dash_time"] = 0.0
+				var acceleration := Vector3(move.x, 0.0, move.y) * speed * 4.0
+				velocity.x = (velocity.x + acceleration.x * delta) * 0.88
+				velocity.z = (velocity.z + acceleration.z * delta) * 0.88
+				var planar := Vector2(velocity.x, velocity.z).limit_length(2.4 * speed)
+				velocity.x = planar.x
+				velocity.z = planar.y
 			velocity.y -= 9.8 * delta
 			var next_position: Vector3 = obj["position"] + velocity * delta
 			if next_position.y <= 0.15:
@@ -849,6 +870,71 @@ func _try_change_color(obj: Dictionary, color_id: String) -> void:
 		return
 	obj["color"] = color_id
 	obj["color_cooldown"] = float(config.get_value("hiders", "color_change_cooldown", 6.0))
+
+
+func _try_dash(obj: Dictionary, move: Vector2) -> void:
+	if not bool(config.get_value("hiders", "dash_enabled", true)):
+		return
+	if float(obj.get("dash_cooldown", 0.0)) > 0.0:
+		return
+	if obj.get("held_by_seeker", false) or obj.get("position", Vector3.ZERO).y > 0.151:
+		return
+	var direction := move
+	if direction.length() < 0.1:
+		direction = obj.get("move_input", Vector2.ZERO)
+	if direction.length() < 0.1:
+		var forward: Vector3 = obj.get("orientation", Quaternion.IDENTITY) * Vector3.FORWARD
+		direction = Vector2(forward.x, forward.z)
+	if direction.length() < 0.1:
+		direction = Vector2(0.0, -1.0)
+	obj["dash_direction"] = direction.normalized()
+	obj["dash_time"] = float(config.get_value("hiders", "dash_duration_seconds", 0.28))
+	obj["dash_cooldown"] = float(config.get_value("hiders", "dash_cooldown_seconds", 3.5))
+
+
+func _try_mimic(obj: Dictionary) -> void:
+	if float(obj.get("mimic_cooldown", 0.0)) > 0.0:
+		return
+	if obj.get("held_by_seeker", false):
+		return
+	var source_id := _nearest_mimic_source(obj)
+	if source_id.is_empty():
+		return
+	var source: Dictionary = objects[source_id]
+	_apply_disguise(obj, String(source.get("shape", obj.get("shape", "cube"))), String(source.get("color", obj.get("color", "white"))), String(source.get("pattern", obj.get("pattern", "solid"))))
+	obj["mimic_cooldown"] = float(config.get_value("hiders", "mimic_cooldown_seconds", 5.0))
+
+
+func _nearest_mimic_source(obj: Dictionary) -> String:
+	var radius := float(config.get_value("hiders", "mimic_radius_meters", 0.75))
+	var position: Vector3 = obj.get("position", Vector3.ZERO)
+	var best_id := ""
+	var best_distance := radius
+	for object_id in objects:
+		var other: Dictionary = objects[object_id]
+		if other.get("owner_player_id", "") == obj.get("owner_player_id", ""):
+			continue
+		if other.get("is_hider", false):
+			continue
+		if not other.get("alive", true):
+			continue
+		var distance := position.distance_to(other.get("position", Vector3.ZERO))
+		if distance <= best_distance:
+			best_distance = distance
+			best_id = object_id
+	return best_id
+
+
+func _apply_disguise(obj: Dictionary, shape_id: String, color_id: String, pattern_id: String) -> void:
+	if _shape_ids.has(shape_id):
+		obj["shape"] = shape_id
+		obj["rest_mode"] = content.get_shape_rest_mode(shape_id)
+		obj["collision_radius"] = _collision_radius_for_shape(shape_id)
+		obj["half_height"] = _half_height_for_shape(shape_id)
+	if _color_ids.has(color_id):
+		obj["color"] = color_id
+	if _pattern_ids.has(pattern_id):
+		obj["pattern"] = pattern_id
 
 
 func _calculate_bullets() -> int:

@@ -26,7 +26,6 @@ var player_name := "Hider"
 var current_phase := "disconnected"
 var danger := "safe"
 var move_vector := Vector2.ZERO
-var freeze_pressed := false
 var client
 var browser
 var content
@@ -49,6 +48,7 @@ var selected_color_index := 0
 var selected_pattern_index := 0
 var pending_shape: Variant = null
 var pending_color: Variant = null
+var pending_ability: Variant = null
 var discovered_games: Array = []
 var selected_game_index := -1
 var cam_yaw := 0.6
@@ -92,7 +92,8 @@ var phase_label: Label
 var danger_badge: Label
 var info_label: Label
 var joystick_area: Control
-var freeze_button: Button
+var dash_button: Button
+var mimic_button: Button
 var color_button: Button
 var shape_button: Button
 var ready_button: Button
@@ -102,6 +103,7 @@ var game_status_label: Label
 
 
 func _ready() -> void:
+	_configure_mobile_window()
 	content = ContentDatabaseScript.new()
 	content.load_default()
 	available_shapes = content.get_shape_ids()
@@ -161,14 +163,15 @@ func build_hider_input() -> Dictionary:
 		"player_id": player_id,
 		"move": [world_move.x, world_move.y],
 		"rotate": 0.0,
-		"freeze": freeze_pressed,
+		"freeze": false,
 		"request_shape": pending_shape,
 		"request_color": pending_color,
-		"ability": null,
+		"ability": pending_ability,
 		"client_time": Time.get_ticks_msec() / 1000.0
 	}
 	pending_shape = null
 	pending_color = null
+	pending_ability = null
 	return message
 
 
@@ -193,6 +196,13 @@ func _camera_relative_move(joy: Vector2) -> Vector2:
 	var right := Vector2(cos(cam_yaw), -sin(cam_yaw))
 	var world := right * joy.x + forward * (-joy.y)
 	return world.limit_length(1.0)
+
+
+func _configure_mobile_window() -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+	DisplayServer.screen_set_keep_on(true)
 
 
 func apply_snapshot(snapshot: Dictionary) -> void:
@@ -312,6 +322,21 @@ func _request_next_shape() -> void:
 		return
 	selected_shape_index = (selected_shape_index + 1) % available_shapes.size()
 	pending_shape = available_shapes[selected_shape_index]
+
+
+func _request_dash() -> void:
+	pending_ability = "dash"
+	_send_immediate_input()
+
+
+func _request_mimic() -> void:
+	pending_ability = "mimic"
+	_send_immediate_input()
+
+
+func _send_immediate_input() -> void:
+	if joined and client.is_connected_to_host():
+		client.send_message(build_hider_input())
 
 
 func _on_ready_pressed() -> void:
@@ -796,7 +821,7 @@ func _build_game_ui() -> void:
 	game_panel = Control.new()
 	game_panel.name = "GamePanel"
 	game_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
-	game_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	game_panel.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(game_panel)
 
 	top_bar = PanelContainer.new()
@@ -842,36 +867,42 @@ func _build_game_ui() -> void:
 	joystick_area.offset_top = -300.0
 	joystick_area.offset_right = 300.0
 	joystick_area.offset_bottom = -40.0
+	joystick_area.mouse_filter = Control.MOUSE_FILTER_STOP
 	joystick_area.draw.connect(_draw_joystick)
+	joystick_area.gui_input.connect(_on_joystick_input)
 	game_panel.add_child(joystick_area)
 
 	var buttons := VBoxContainer.new()
 	buttons.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	buttons.offset_left = -220.0
-	buttons.offset_top = -330.0
-	buttons.offset_right = -40.0
+	buttons.offset_left = -214.0
+	buttons.offset_top = -360.0
+	buttons.offset_right = -32.0
 	buttons.offset_bottom = -30.0
-	buttons.add_theme_constant_override("separation", 12)
+	buttons.add_theme_constant_override("separation", 10)
 	game_panel.add_child(buttons)
 
 	ready_button = _make_button("READY", 22, true)
-	ready_button.custom_minimum_size = Vector2(180, 62)
+	ready_button.custom_minimum_size = Vector2(180, 56)
 	ready_button.pressed.connect(_on_ready_pressed)
 	buttons.add_child(ready_button)
 
-	freeze_button = _make_button("FREEZE", 22, false)
-	freeze_button.custom_minimum_size = Vector2(180, 62)
-	freeze_button.button_down.connect(func() -> void: freeze_pressed = true)
-	freeze_button.button_up.connect(func() -> void: freeze_pressed = false)
-	buttons.add_child(freeze_button)
+	dash_button = _make_button("DASH", 22, true)
+	dash_button.custom_minimum_size = Vector2(180, 56)
+	dash_button.pressed.connect(_request_dash)
+	buttons.add_child(dash_button)
+
+	mimic_button = _make_button("MIMIC", 22, false)
+	mimic_button.custom_minimum_size = Vector2(180, 56)
+	mimic_button.pressed.connect(_request_mimic)
+	buttons.add_child(mimic_button)
 
 	color_button = _make_button("COLOR", 22, false)
-	color_button.custom_minimum_size = Vector2(180, 62)
+	color_button.custom_minimum_size = Vector2(180, 56)
 	color_button.pressed.connect(_request_next_color)
 	buttons.add_child(color_button)
 
 	shape_button = _make_button("SHAPE", 22, false)
-	shape_button.custom_minimum_size = Vector2(180, 62)
+	shape_button.custom_minimum_size = Vector2(180, 56)
 	shape_button.pressed.connect(_request_next_shape)
 	buttons.add_child(shape_button)
 
@@ -926,6 +957,33 @@ func _gui_input(event: InputEvent) -> void:
 			_end_pointer(-2)
 	elif event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		_drag_pointer(-2, event.position, event.relative)
+
+
+func _on_joystick_input(event: InputEvent) -> void:
+	if game_panel == null or not game_panel.visible:
+		return
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			joystick_drag_index = event.index
+			joystick_center = joystick_area.get_global_rect().get_center()
+			_update_joystick_from(event.position)
+		elif event.index == joystick_drag_index:
+			_end_pointer(event.index)
+		joystick_area.accept_event()
+	elif event is InputEventScreenDrag and event.index == joystick_drag_index:
+		_update_joystick_from(event.position)
+		joystick_area.accept_event()
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			joystick_drag_index = -2
+			joystick_center = joystick_area.get_global_rect().get_center()
+			_update_joystick_from(event.global_position)
+		else:
+			_end_pointer(-2)
+		joystick_area.accept_event()
+	elif event is InputEventMouseMotion and joystick_drag_index == -2 and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		_update_joystick_from(event.global_position)
+		joystick_area.accept_event()
 
 
 func _begin_pointer(index: int, position_value: Vector2) -> void:
@@ -983,7 +1041,12 @@ func _show_game() -> void:
 func _update_status() -> void:
 	var shape_text := String(hider_state.get("shape", "-"))
 	var color_text := String(hider_state.get("color", "-"))
-	var cooldown_text := "shape %.0fs  color %.0fs" % [float(cooldowns.get("shape", 0.0)), float(cooldowns.get("color", 0.0))]
+	var cooldown_text := "shape %.0fs  color %.0fs  dash %.0fs  mimic %.0fs" % [
+		float(cooldowns.get("shape", 0.0)),
+		float(cooldowns.get("color", 0.0)),
+		float(cooldowns.get("dash", 0.0)),
+		float(cooldowns.get("mimic", 0.0))
+	]
 	if menu_status_label != null:
 		var games_hint := "Searching your Wi-Fi for games..." if discovered_games.is_empty() else "%d game(s) found" % discovered_games.size()
 		menu_status_label.text = "%s   |   %s   %s" % [connection_status, games_hint, host_message]
@@ -1001,9 +1064,12 @@ func _update_status() -> void:
 		info_label.text = "%s %s   %s%s" % [shape_text, color_text, cooldown_text, gun_note]
 	if ready_button != null:
 		ready_button.visible = current_phase == "lobby" and not spectator
-	if freeze_button != null:
+	if dash_button != null:
 		var in_round := current_phase == "blackout" or current_phase == "seek"
-		freeze_button.disabled = not in_round or spectator
+		dash_button.disabled = not in_round or spectator or float(cooldowns.get("dash", 0.0)) > 0.05
+		mimic_button.disabled = not in_round or spectator or float(cooldowns.get("mimic", 0.0)) > 0.05
+		dash_button.text = "DASH" if float(cooldowns.get("dash", 0.0)) <= 0.05 else "DASH %.0f" % float(cooldowns.get("dash", 0.0))
+		mimic_button.text = "MIMIC" if float(cooldowns.get("mimic", 0.0)) <= 0.05 else "MIMIC %.0f" % float(cooldowns.get("mimic", 0.0))
 		color_button.disabled = not in_round or spectator
 		shape_button.disabled = not in_round or spectator
 	if overlay_label != null:
