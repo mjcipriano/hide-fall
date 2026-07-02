@@ -681,9 +681,47 @@ User feedback after v0.3.0: (a) on the phone the lobby menu renders in the botto
 
 ## Next
 
-1. Commit and push the v0.3.1 implementation.
-2. Watch the GitHub Actions Test And Build workflow on `master`.
-3. Tag and push `v0.3.1`.
-4. Verify the GitHub Release attaches `hidefall-quest-0.3.1.apk`, `hidefall-mobile-0.3.1.apk`, and `SHA256SUMS`.
-5. Download the release assets, run `sha256sum -c`, run `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 tools/verify_android_artifacts.sh`, and smoke-test the released Quest APK.
+1. ~~Commit and push the v0.3.1 implementation.~~ Done in `dfad5d2`.
+2. ~~Watch the GitHub Actions Test And Build workflow on `master`.~~ Done; run `28559968359` passed.
+3. ~~Tag and push `v0.3.1`.~~ Done.
+4. ~~Verify the GitHub Release attaches `hidefall-quest-0.3.1.apk`, `hidefall-mobile-0.3.1.apk`, and `SHA256SUMS`.~~ Done.
+5. ~~Download the release assets, run `sha256sum -c`, run `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 tools/verify_android_artifacts.sh`, and smoke-test the released Quest APK.~~ Done.
 6. Still useful after release: install the mobile APK on an Android phone to verify Wi-Fi discovery/tap-join on real phone hardware; iOS remains untested.
+
+## 2026-07-01 v0.3.1 Release Verification
+
+- Committed and pushed `dfad5d2 Add mobile layout fix and XR settings menu` to `master`.
+- GitHub Actions `Test And Build` run `28559968359` passed:
+  - Godot tests passed,
+  - release APK build passed,
+  - APK artifact verification passed,
+  - CI uploaded branch APK artifacts.
+- Tagged and pushed `v0.3.1`.
+- GitHub Actions `Release` run `28560110566` passed:
+  - release signing secrets were present,
+  - tests passed,
+  - release APKs built,
+  - APK artifact verification passed,
+  - release notes/checksums were written,
+  - `Hidefall 0.3.1` was published.
+- Tag-triggered `Test And Build` run `28560110569` passed.
+- Verified GitHub release assets:
+  - `hidefall-quest-0.3.1.apk`,
+  - `hidefall-mobile-0.3.1.apk`,
+  - `SHA256SUMS`.
+- Downloaded release assets to `/tmp/hidefall-release-v0.3.1`.
+- `sha256sum -c SHA256SUMS` passed for both APKs.
+- `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 tools/verify_android_artifacts.sh /tmp/hidefall-release-v0.3.1/hidefall-quest-0.3.1.apk /tmp/hidefall-release-v0.3.1/hidefall-mobile-0.3.1.apk` passed.
+- Release Quest APK smoke passed on Quest 3 over Windows ADB after reconnecting wireless ADB to `192.168.0.253:5555`:
+  - command: `ADB=/mnt/c/Users/mcipr/AppData/Local/Android/Sdk/platform-tools/adb.exe HIDEFALL_QUEST_SMOKE_SECONDS=12 tools/quest_smoke_test.sh /tmp/hidefall-release-v0.3.1/hidefall-quest-0.3.1.apk`,
+  - install-over succeeded,
+  - process stayed running,
+  - log showed `Hidefall visible gameplay ready: phase=object_rain objects=78 object_nodes=78 xr=OpenXR immersive passthrough`,
+  - log saved to `build/quest-smoke/quest-smoke-logcat.txt`.
+
+## Next
+
+1. Install `hidefall-mobile-0.3.1.apk` on an Android phone and verify real-device Wi-Fi discovery/tap-join, pre-join disguise selection, and in-round 3D world controls.
+2. In headset, feel-check the new Y/M settings menu ergonomics and pointer activation; adjust row spacing/angle if the wrist pose is uncomfortable.
+3. Non-blocking cleanup: update GitHub Actions setup-miniconda options to remove `auto-activate-base` and implicit `defaults` channel annotations.
+4. iOS build path remains untested.
