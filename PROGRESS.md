@@ -757,10 +757,17 @@ Local verification:
 - `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 conda run -n hidefall make verify-apks` passes.
 - Quest hardware smoke passes over Windows ADB with one USB transport: `ADB=/mnt/c/Users/mcipr/AppData/Local/Android/Sdk/platform-tools/adb.exe HIDEFALL_QUEST_SMOKE_SECONDS=12 tools/quest_smoke_test.sh build/hidefall-quest.apk`; install-over succeeded and log shows `Hidefall visible world pending: phase=lobby objects=0 object_nodes=0 xr=OpenXR immersive passthrough network=listening`.
 
+## 2026-07-01 v0.3.2 Release Verification
+
+- Master Test And Build run `28561548974` passed for commit `42111a5` (pushed by the user).
+- Tagged and pushed `v0.3.2`; Release run `28563042035` and tag Test And Build run `28563042007` both passed.
+- GitHub Release `Hidefall 0.3.2` published 2026-07-02T03:28:00Z with `hidefall-quest-0.3.2.apk`, `hidefall-mobile-0.3.2.apk`, `SHA256SUMS`.
+- Downloaded assets: `sha256sum -c` passed; `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 tools/verify_android_artifacts.sh` passed.
+- Released Quest APK smoke passed on hardware over wireless adb (192.168.0.253:5555): install-over succeeded, log shows the lobby-first marker `Hidefall visible world pending: phase=lobby objects=0 object_nodes=0 xr=OpenXR immersive passthrough network=listening` plus `Hidefall LAN announcer broadcasting on udp/29445`, zero tonemapper/SCRIPT ERROR lines.
+
 ## Next
 
-1. Commit/push v0.3.2, watch `master` Test And Build, tag `v0.3.2`, verify release assets/checksums/APK contents, and smoke-test the released Quest APK.
-2. Install `hidefall-mobile-0.3.2.apk` on the Android phone and verify fullscreen, joystick movement, Dash, and Mimic in a real joined round.
-3. In headset, validate that lobby-first flow plus wrist-menu start feels correct and that late phone joins take over bots/decoys as expected.
-4. Non-blocking cleanup: update GitHub Actions setup-miniconda options to remove `auto-activate-base` and implicit `defaults` channel annotations.
-5. iOS build path remains untested.
+1. Install `hidefall-mobile-0.3.2.apk` on the Android phone and verify fullscreen, joystick movement, Dash, and Mimic in a real joined round.
+2. In headset, validate that lobby-first flow plus wrist-menu start feels correct and that late phone joins take over bots/decoys as expected.
+3. Non-blocking cleanup: update GitHub Actions setup-miniconda options to remove `auto-activate-base` and implicit `defaults` channel annotations.
+4. iOS build path remains untested.
