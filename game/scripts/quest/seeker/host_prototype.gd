@@ -186,7 +186,7 @@ func _build_world() -> void:
 
 	var start_hint := Label3D.new()
 	start_hint.name = "ArenaHint"
-	start_hint.text = "Open the wrist menu to configure and start a round."
+	start_hint.text = "Press A to start. Open the wrist menu for settings."
 	start_hint.font_size = 32
 	start_hint.outline_size = 8
 	start_hint.pixel_size = 0.0024
@@ -252,7 +252,7 @@ func _build_hud() -> void:
 	help_label.position = Vector2(20, 580)
 	help_label.size = Vector2(900, 110)
 	help_label.add_theme_font_size_override("font_size", 16)
-	help_label.text = "M: settings menu  |  R: start/confirm/rematch  |  Click: shoot  |  Hold E: grab/drop  |  Q: scan  |  WASD local hider"
+	help_label.text = "R: start/confirm/rematch  |  M: settings  |  Click: shoot  |  Hold E: grab/drop  |  Q: scan  |  WASD local hider"
 	canvas.add_child(help_label)
 
 	crosshair = ColorRect.new()
@@ -500,7 +500,7 @@ func _update_hand_menu() -> void:
 func _phase_short_text() -> String:
 	match simulation.phase:
 		HidefallSimulationScript.PHASE_LOBBY:
-			return "LOBBY - Y menu to start"
+			return "LOBBY - A starts"
 		HidefallSimulationScript.PHASE_ROOM_SETUP:
 			return "SETUP - A to confirm"
 		HidefallSimulationScript.PHASE_OBJECT_RAIN:
@@ -815,24 +815,31 @@ func _xr_button_pressed(controller: XRController3D, button_name: String, axis_na
 func _activate_primary_action() -> void:
 	match simulation.phase:
 		HidefallSimulationScript.PHASE_LOBBY:
-			network_status = "open the wrist menu to start"
+			_start_or_restart_round("round started")
 		HidefallSimulationScript.PHASE_ROOM_SETUP:
 			simulation.confirm_room_setup()
 		HidefallSimulationScript.PHASE_SEEK:
 			_use_scan_pulse()
 		HidefallSimulationScript.PHASE_RESULTS:
-			simulation.start_round()
-			_rebuild_objects()
+			_start_or_restart_round("rematch started")
+
+
+func _start_or_restart_round(status: String) -> bool:
+	if not held_object_id.is_empty():
+		_end_grab()
+	if not simulation.start_round():
+		network_status = "round cannot start yet"
+		return false
+	simulation.confirm_room_setup()
+	_rebuild_objects()
+	network_status = status
+	last_scan_text = "objects raining now"
+	_log_visible_gameplay_state()
+	return true
 
 
 func _restart_round_from_settings() -> void:
-	if not held_object_id.is_empty():
-		_end_grab()
-	if simulation.start_round():
-		simulation.confirm_room_setup()
-		_rebuild_objects()
-		network_status = "round restarted"
-		last_scan_text = "settings restart"
+	_start_or_restart_round("round restarted")
 
 
 func _end_round_from_settings() -> void:
@@ -919,7 +926,7 @@ func _is_xr_active() -> bool:
 func _phase_instruction_text() -> String:
 	match simulation.phase:
 		HidefallSimulationScript.PHASE_LOBBY:
-			return "READY - open wrist menu (Y) to start"
+			return "READY - press A/R to start"
 		HidefallSimulationScript.PHASE_ROOM_SETUP:
 			return "SETUP - press A to confirm your play space"
 		HidefallSimulationScript.PHASE_OBJECT_RAIN:
@@ -927,7 +934,7 @@ func _phase_instruction_text() -> String:
 		HidefallSimulationScript.PHASE_SEEK:
 			return "HUNT - find the live props, misses cost ammo"
 		HidefallSimulationScript.PHASE_RESULTS:
-			return "ROUND OVER - press A to play again"
+			return "ROUND OVER - press A/R to play again"
 	return "HIDEFALL"
 
 

@@ -838,9 +838,30 @@ Implemented for v0.3.4 / code 13:
 - Downloaded assets: `sha256sum -c` passed; `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 tools/verify_android_artifacts.sh` passed.
 - Released Quest APK smoke passed on hardware over wireless adb (192.168.0.253:5555): install-over succeeded, lobby-first marker plus announcer line, zero tonemapper/SCRIPT ERROR lines. The smoke script now ignores system-pid `xrResume` teardown noise (still fails when the app pid logs it).
 
+## 2026-07-02 Follow-up: direct start/restart + advanced compact wrist menu
+
+User reported that starting from the left-hand menu did not start the game, and that the left-hand menu was still too big/ugly. Implemented:
+
+- Bumped Android version metadata to `0.3.5` / code `14` for the release.
+- `host_prototype.gd`: primary action now starts immediately from lobby and rematches from results via `_start_or_restart_round()`; it confirms room setup and rebuilds props so the round goes straight into visible object rain. Desktop `R` and Quest `A` use the same path. Menu/help text now says A/R starts/restarts instead of routing start through the wrist menu.
+- `xr_settings_menu.gd`: removed the start/restart row from the pointer menu. The menu is smaller again (0.52 x 0.46 m), grouped into ROUND CONTROL / SEEKER / ROOM + HIDERS, and renders settings as VR-style value rows with slider tracks, knobs, a toggle treatment for hunt timer, and a segmented treatment for mode. It keeps only the secondary "End active round" action.
+- Tests updated: settings menu coverage checks grouped rows, separate value labels, slider/toggle rows, and end-round action; host smoke now asserts primary action starts from lobby and restarts from results.
+- Verification: `make test` passes after the change. Expected existing test-log noise still appears for malformed JSON and sandbox-blocked UDP loopback, but the runner exits `Godot tests passed`.
+- Full local + headset verification at 2026-07-02 11:51 ET:
+  - `make test` passed.
+  - `make build-apks` passed after rerunning outside the sandbox so Gradle could open localhost sockets.
+  - `make verify-apks` passed for `build/hidefall-quest.apk` and `build/hidefall-mobile.apk`.
+  - Quest smoke passed on the connected Quest over wireless adb `192.168.0.253:5555` after re-enabling TCP mode from Windows/Oculus ADB and uninstalling the previously installed differently signed package once. Smoke log: `build/quest-smoke/quest-smoke-logcat.txt`; marker: `Hidefall visible world pending: phase=lobby objects=0 object_nodes=0 xr=OpenXR immersive passthrough network=listening`; LAN announcer started on udp/29445; zero tonemapper/SCRIPT ERROR/fatal crash markers. The only matched Godot error is the known ignored `Unsupported interaction profile /interaction_profiles/khr/generic_controller`.
+- Release-candidate verification after the `0.3.5` / code `14` bump at 2026-07-02 12:39 ET:
+  - `make test` passed.
+  - `make build-apks` passed outside the sandbox.
+  - `make verify-apks` passed.
+  - `aapt dump badging` confirmed both local APKs have `versionName=0.3.5` and `versionCode=14`.
+  - `make smoke-quest-apk` passed on Quest over wireless adb `192.168.0.253:5555`; marker: `Hidefall visible world pending: phase=lobby objects=0 object_nodes=0 xr=OpenXR immersive passthrough network=listening`; LAN announcer started on udp/29445; zero tonemapper/SCRIPT ERROR/fatal crash markers; same known generic-controller OpenXR warning only.
+
 ## Next
 
 1. Install `hidefall-mobile-0.3.4.apk` on the Android phone and verify in a real round: fullscreen, snappy joystick, Dash, Mimic, Quake (props fly + rumble on the headset), Ping (seeker hears your jingle from your prop), and the endless-hiders respawn flash.
-2. In headset, feel-check: smaller wrist menu + status panel (text fits now), the two game modes (switch Mode in the wrist menu, restart round), earthquake chaos, and whether per-player ping jingles are distinguishable. Tune `hiders.ping_cooldown_seconds` / `earthquake_power` if abilities feel too strong or weak.
+2. In headset, feel-check: direct A start/restart, the new smaller slider/toggle wrist settings menu, status panel text fit, the two game modes (switch Mode in the wrist menu, restart round), earthquake chaos, and whether per-player ping jingles are distinguishable. Tune `hiders.ping_cooldown_seconds` / `earthquake_power` if abilities feel too strong or weak.
 3. Non-blocking cleanup: update GitHub Actions setup-miniconda options to remove `auto-activate-base` and implicit `defaults` channel annotations.
 4. iOS build path remains untested.

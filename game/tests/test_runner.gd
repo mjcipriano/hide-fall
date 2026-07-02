@@ -675,10 +675,13 @@ func _test_xr_settings_menu() -> void:
 	menu.setup(config)
 	root.add_child(menu)
 	menu.set_open(true)
-	_assert(menu.get_row_count() >= 11, "XR settings menu builds action and setting rows")
-	_assert(menu.get_row_label(2).contains("Mode: One-shot"), "XR settings menu shows the game mode row defaulting to one-shot")
-	_assert(menu.get_row_label(3).contains("Gun cooldown"), "XR settings menu shows gun cooldown row")
-	_assert(menu.get_row_label(5).contains("Timer ends hunt: Off"), "XR settings menu shows the hunt timer toggle defaulting off")
+	_assert(menu.get_row_count() >= 13, "XR settings menu builds compact grouped control rows")
+	_assert(menu.get_row_label(0).contains("ROUND CONTROL"), "XR settings menu groups round controls")
+	_assert(menu.get_row_label(2).contains("Mode"), "XR settings menu shows the game mode row")
+	_assert(menu.get_row_value_label(2).contains("One-shot"), "XR settings menu shows the mode value defaulting to one-shot")
+	_assert(menu.get_row_label(5).contains("Gun cooldown"), "XR settings menu shows gun cooldown slider row")
+	_assert(menu.get_row_label(3).contains("Timer ends hunt"), "XR settings menu shows the hunt timer toggle")
+	_assert(menu.get_row_value_label(3).contains("Off"), "XR settings menu shows the hunt timer toggle defaulting off")
 	var has_blackout_row := false
 	for index in menu.get_row_count():
 		if menu.get_row_label(index).contains("Blackout"):
@@ -687,7 +690,7 @@ func _test_xr_settings_menu() -> void:
 	menu.force_hover(2)
 	menu.activate_hovered()
 	_assert(String(config.get_value("round", "mode", "")) == "endless_hiders", "mode row cycles to endless hiders")
-	_assert(menu.get_row_label(2).contains("Endless hiders"), "mode row label shows the new mode")
+	_assert(menu.get_row_value_label(2).contains("Endless"), "mode row value shows the new mode")
 	menu.activate_hovered()
 	_assert(String(config.get_value("round", "mode", "")) == "one_shot", "mode row cycles back to one-shot")
 	var changed := {"section": "", "key": "", "value": null}
@@ -696,7 +699,7 @@ func _test_xr_settings_menu() -> void:
 		changed["key"] = key
 		changed["value"] = value
 	)
-	var hovered := menu.update_pointer(Vector3(0.0, 0.0775, 1.0), Vector3(0.0, 0.0, -1.0))
+	var hovered := menu.update_pointer(Vector3(0.0, -0.045, 1.0), Vector3(0.0, 0.0, -1.0))
 	_assert(hovered, "XR settings menu pointer intersects the panel")
 	_assert(menu.activate_hovered(), "XR settings menu activates hovered setting row")
 	_assert(changed.get("section", "") == "seeker" and changed.get("key", "") == "shot_cooldown_seconds", "XR settings menu emits setting change")
@@ -705,9 +708,9 @@ func _test_xr_settings_menu() -> void:
 	menu.action_requested.connect(func(value) -> void:
 		action["value"] = String(value)
 	)
-	menu.force_hover(0)
+	menu.force_hover(1)
 	_assert(menu.activate_hovered(), "XR settings menu activates action row")
-	_assert(action["value"] == "restart_round", "XR settings menu emits restart action")
+	_assert(action["value"] == "end_round", "XR settings menu emits end-round action")
 	root.remove_child(menu)
 	menu.free()
 
@@ -769,7 +772,7 @@ func _test_host_scene_smoke() -> void:
 	_assert(scene.simulation != null, "host scene creates simulation")
 	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_LOBBY, "host scene starts in lobby")
 	_assert(scene.settings_menu != null, "host scene creates settings menu")
-	scene.settings_menu.force_hover(3)
+	scene.settings_menu.force_hover(5)
 	scene.settings_menu.activate_hovered()
 	_assert(absf(float(scene.config.get_value("seeker", "shot_cooldown_seconds", 0.0)) - 3.5) < 0.001, "host settings menu updates config")
 	var bot_count_before: int = scene.simulation.players.size()
@@ -780,9 +783,12 @@ func _test_host_scene_smoke() -> void:
 	_assert(not scene.get_join_payload_text().is_empty(), "host scene creates join payload")
 	_assert(scene.get_join_payload_text().to_utf8_buffer().size() <= 106, "host join payload fits QR capacity")
 	_assert(scene.qr_texture_rect.texture != null, "host scene creates join QR texture")
-	scene._start_visible_solo_round()
-	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_OBJECT_RAIN, "host scene can start a visible solo round")
+	scene._activate_primary_action()
+	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_OBJECT_RAIN, "host scene primary action starts a visible solo round from lobby")
 	_assert(scene.object_nodes.size() >= 75, "visible solo round creates prop nodes immediately")
+	scene.simulation.end_round()
+	scene._activate_primary_action()
+	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_OBJECT_RAIN, "host scene primary action restarts from results")
 	var takeover_host := FakeNetworkHost.new()
 	scene.network_host = takeover_host
 	scene._handle_join_request(99, {
