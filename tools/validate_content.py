@@ -36,6 +36,8 @@ def validate_settings() -> None:
     for key in ["object_rain_seconds", "seek_seconds", "results_seconds"]:
         if data["round"][key] <= 0:
             fail(f"{path} round.{key} must be positive")
+    if data["round"].get("mode", "one_shot") not in {"one_shot", "endless_hiders"}:
+        fail(f"{path} round.mode must be one_shot or endless_hiders")
     if data["objects"]["decoy_count"] < 20:
         fail(f"{path} objects.decoy_count must be at least 20")
     if data["objects"]["max_decoy_count"] < data["objects"]["decoy_count"]:

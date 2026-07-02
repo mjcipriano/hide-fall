@@ -26,10 +26,16 @@ var seeker_position := Vector3.ZERO
 var seeker_forward := Vector3.FORWARD
 var play_radius := 3.0
 
+const MODE_ONE_SHOT := "one_shot"
+const MODE_ENDLESS_HIDERS := "endless_hiders"
+
 var players: Dictionary = {}
 var objects: Dictionary = {}
 var scores: Dictionary = {}
 var stats: Dictionary = {}
+# Gameplay happenings (earthquake, hider_ping, hider_respawn) queued for the
+# host to drain each frame and turn into audio/feedback.
+var events: Array = []
 
 var _next_player_index := 1
 var _next_object_index := 1
@@ -68,6 +74,17 @@ func _reset_session_state() -> void:
 	}
 	_next_player_index = 1
 	_next_object_index = 1
+	events.clear()
+
+
+func game_mode() -> String:
+	return String(config.get_value("round", "mode", MODE_ONE_SHOT))
+
+
+func drain_events() -> Array:
+	var drained := events.duplicate()
+	events.clear()
+	return drained
 
 
 func add_hider(player_name: String, is_bot: bool = false) -> String:
@@ -82,6 +99,7 @@ func add_hider(player_name: String, is_bot: bool = false) -> String:
 		"alive": true,
 		"object_id": "",
 		"score": 0,
+		"times_found": 0,
 		"preferred_shape": "",
 		"preferred_color": "",
 		"preferred_pattern": ""
@@ -271,6 +289,10 @@ func apply_hider_input(player_id: String, input: Dictionary) -> bool:
 				_try_dash(obj, move)
 			"mimic":
 				_try_mimic(obj)
+			"earthquake":
+				_try_earthquake(obj)
+			"ping":
+				_try_ping(obj)
 
 	objects[object_id] = obj
 	return true
@@ -294,6 +316,8 @@ func begin_shot_cooldown() -> void:
 
 # Default ammo economy: hitting a live hider is free; only misses (decoys)
 # consume a shot, and spending the last shot ends the round for the seeker.
+# In endless_hiders mode every shot object is destroyed and a found hider
+# respawns into a random surviving decoy body until the prop pile runs out.
 func shoot_object(object_id: String) -> Dictionary:
 	var gate := can_fire()
 	if not gate.get("accepted", false):
@@ -302,16 +326,20 @@ func shoot_object(object_id: String) -> Dictionary:
 		return {"accepted": false, "reason": "unknown_object"}
 	begin_shot_cooldown()
 	stats["shots_fired"] = int(stats["shots_fired"]) + 1
+	var endless := game_mode() == MODE_ENDLESS_HIDERS
 	var obj: Dictionary = objects[object_id]
 	if obj.get("is_hider", false) and obj.get("alive", true):
 		if bool(config.get_value("seeker", "consume_shot_on_hit", false)):
 			shots_remaining -= 1
-		obj["alive"] = false
-		objects[object_id] = obj
-		var owner_id: String = obj.get("owner_player_id", "")
-		if players.has(owner_id):
-			players[owner_id]["alive"] = false
 		stats["correct_shots"] = int(stats["correct_shots"]) + 1
+		var owner_id: String = obj.get("owner_player_id", "")
+		if endless:
+			_respawn_hider_into_decoy(object_id, owner_id)
+		else:
+			obj["alive"] = false
+			objects[object_id] = obj
+			if players.has(owner_id):
+				players[owner_id]["alive"] = false
 		if _live_hider_count() == 0:
 			stats["all_hiders_found"] = true
 			stats["time_bonus"] = _time_remaining()
@@ -319,11 +347,48 @@ func shoot_object(object_id: String) -> Dictionary:
 		return {"accepted": true, "hit": true, "player_id": owner_id}
 	shots_remaining -= 1
 	stats["wrong_shots"] = int(stats["wrong_shots"]) + 1
-	obj["damaged"] = true
-	objects[object_id] = obj
+	if endless:
+		objects.erase(object_id)
+	else:
+		obj["damaged"] = true
+		objects[object_id] = obj
 	if shots_remaining <= 0 and bool(config.get_value("round", "end_when_out_of_shots", true)):
 		_finish_round()
+	elif objects.is_empty():
+		_finish_round()
 	return {"accepted": true, "hit": false}
+
+
+# Endless mode: the found body bursts, and the hider's progress (score stats,
+# ability charges, cooldowns) moves into a random surviving decoy body. With no
+# decoys left the hider is out for good.
+func _respawn_hider_into_decoy(old_object_id: String, owner_id: String) -> void:
+	var old_obj: Dictionary = objects[old_object_id]
+	objects.erase(old_object_id)
+	if players.has(owner_id):
+		players[owner_id]["times_found"] = int(players[owner_id].get("times_found", 0)) + 1
+	var decoy_ids := get_decoy_object_ids()
+	if decoy_ids.is_empty():
+		if players.has(owner_id):
+			players[owner_id]["alive"] = false
+			players[owner_id]["object_id"] = ""
+		return
+	var new_body_id: String = decoy_ids[rng.randi_range(0, decoy_ids.size() - 1)]
+	var new_body: Dictionary = objects[new_body_id]
+	new_body["is_hider"] = true
+	new_body["owner_player_id"] = owner_id
+	new_body["alive"] = true
+	for carried_key in ["alive_time", "distance_moved", "freeze_near_seconds", "close_calls", "inspected_survived", "earthquake_uses", "dash_cooldown", "mimic_cooldown", "ping_cooldown", "shape_cooldown", "color_cooldown"]:
+		new_body[carried_key] = old_obj.get(carried_key, new_body.get(carried_key, 0.0))
+	objects[new_body_id] = new_body
+	if players.has(owner_id):
+		players[owner_id]["object_id"] = new_body_id
+	events.append({
+		"type": "hider_respawn",
+		"player_id": owner_id,
+		"object_id": new_body_id,
+		"position": new_body.get("position", Vector3.ZERO)
+	})
 
 
 func use_scan_pulse(origin: Vector3, radius: float = 1.35) -> Dictionary:
@@ -567,6 +632,7 @@ func get_state_snapshot(for_player_id: String = "") -> Dictionary:
 		"version": NetworkMessageValidatorScript.PROTOCOL_VERSION,
 		"server_tick": server_tick,
 			"phase": phase,
+			"mode": game_mode(),
 			"time_remaining": _time_remaining(),
 			"shots_remaining": shots_remaining,
 			"shot_cooldown_remaining": snappedf(shot_cooldown_remaining, 0.01),
@@ -604,7 +670,9 @@ func get_hider_state(player_id: String) -> Dictionary:
 		"pattern": obj.get("pattern", "solid"),
 		"position": _vector3_to_array(obj.get("position", Vector3.ZERO)),
 		"held_by_seeker": obj.get("held_by_seeker", false),
-		"freeze": obj.get("freeze", false)
+		"freeze": obj.get("freeze", false),
+		"earthquake_uses": int(obj.get("earthquake_uses", 0)),
+		"times_found": int(players[player_id].get("times_found", 0))
 	}
 
 
@@ -619,7 +687,8 @@ func get_hider_cooldowns(player_id: String) -> Dictionary:
 		"shape": float(obj.get("shape_cooldown", 0.0)),
 		"color": float(obj.get("color_cooldown", 0.0)),
 		"dash": float(obj.get("dash_cooldown", 0.0)),
-		"mimic": float(obj.get("mimic_cooldown", 0.0))
+		"mimic": float(obj.get("mimic_cooldown", 0.0)),
+		"ping": float(obj.get("ping_cooldown", 0.0))
 	}
 
 
@@ -747,6 +816,8 @@ func _create_object(is_hider: bool, owner_player_id: String, overrides: Dictiona
 		"dash_time": 0.0,
 		"dash_direction": Vector2.ZERO,
 		"mimic_cooldown": 0.0,
+		"ping_cooldown": 0.0,
+		"earthquake_uses": int(config.get_value("hiders", "earthquake_uses", 1)) if is_hider else 0,
 		"alive_time": 0.0,
 		"freeze_near_seconds": 0.0,
 		"close_calls": 0,
@@ -806,6 +877,7 @@ func _integrate_hider_motion(delta: float) -> void:
 		obj["color_cooldown"] = max(0.0, float(obj["color_cooldown"]) - delta)
 		obj["dash_cooldown"] = max(0.0, float(obj.get("dash_cooldown", 0.0)) - delta)
 		obj["mimic_cooldown"] = max(0.0, float(obj.get("mimic_cooldown", 0.0)) - delta)
+		obj["ping_cooldown"] = max(0.0, float(obj.get("ping_cooldown", 0.0)) - delta)
 		var airborne: bool = obj["position"].y > 0.151
 		if obj.get("freeze", false) and not airborne:
 			obj["velocity"] = Vector3.ZERO
@@ -901,6 +973,56 @@ func _try_dash(obj: Dictionary, move: Vector2) -> void:
 	obj["dash_direction"] = direction.normalized()
 	obj["dash_time"] = float(config.get_value("hiders", "dash_duration_seconds", 0.28))
 	obj["dash_cooldown"] = float(config.get_value("hiders", "dash_cooldown_seconds", 3.5))
+
+
+# One-use panic button: every loose prop in the room is hurled in a random
+# direction into the air and tumbles back down, giving hiders cover to move.
+func _try_earthquake(obj: Dictionary) -> void:
+	if not bool(config.get_value("hiders", "earthquake_enabled", true)):
+		return
+	if int(obj.get("earthquake_uses", 0)) <= 0:
+		return
+	if obj.get("held_by_seeker", false):
+		return
+	obj["earthquake_uses"] = int(obj["earthquake_uses"]) - 1
+	var power := float(config.get_value("hiders", "earthquake_power", 1.0))
+	for object_id in objects:
+		var target: Dictionary = objects[object_id]
+		if target.get("held_by_seeker", false):
+			continue
+		if target.get("is_hider", false) and not target.get("alive", true):
+			continue
+		target["velocity"] = Vector3(
+			rng.randf_range(-3.2, 3.2),
+			rng.randf_range(2.2, 5.4),
+			rng.randf_range(-3.2, 3.2)
+		) * power
+		var spin_axis := Vector3(rng.randf_range(-1.0, 1.0), rng.randf_range(-0.5, 0.5), rng.randf_range(-1.0, 1.0))
+		if spin_axis.length() > 0.001:
+			target["spin_axis"] = spin_axis.normalized()
+		target["spin_speed"] = rng.randf_range(2.5, 6.5)
+		objects[object_id] = target
+	events.append({
+		"type": "earthquake",
+		"player_id": obj.get("owner_player_id", ""),
+		"position": obj.get("position", Vector3.ZERO)
+	})
+
+
+# A short taunt sound the seeker hears coming from the hider's prop; the host
+# renders it spatially and gives each player a unique jingle.
+func _try_ping(obj: Dictionary) -> void:
+	if float(obj.get("ping_cooldown", 0.0)) > 0.0:
+		return
+	if obj.get("held_by_seeker", false):
+		return
+	obj["ping_cooldown"] = float(config.get_value("hiders", "ping_cooldown_seconds", 4.0))
+	events.append({
+		"type": "hider_ping",
+		"player_id": obj.get("owner_player_id", ""),
+		"object_id": obj.get("object_id", ""),
+		"position": obj.get("position", Vector3.ZERO)
+	})
 
 
 func _try_mimic(obj: Dictionary) -> void:

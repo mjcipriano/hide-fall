@@ -4,12 +4,12 @@ extends Node3D
 signal action_requested(action)
 signal setting_changed(section, key, value)
 
-const PANEL_WIDTH := 0.92
-const PANEL_HEIGHT := 0.80
-const ROW_WIDTH := 0.80
-const ROW_HEIGHT := 0.052
-const ROW_START_Y := 0.265
-const ROW_STEP := 0.057
+const PANEL_WIDTH := 0.66
+const PANEL_HEIGHT := 0.62
+const ROW_WIDTH := 0.58
+const ROW_HEIGHT := 0.038
+const ROW_START_Y := 0.205
+const ROW_STEP := 0.0425
 
 var config
 var rows: Array[Dictionary] = []
@@ -113,6 +113,7 @@ func _build_rows() -> void:
 	rows = [
 		{"type": "action", "label": "Start / restart round", "action": "restart_round"},
 		{"type": "action", "label": "End round", "action": "end_round"},
+		{"type": "setting", "label": "Mode", "section": "round", "key": "mode", "values": ["one_shot", "endless_hiders"], "labels": ["One-shot", "Endless hiders"], "suffix": ""},
 		{"type": "setting", "label": "Gun cooldown", "section": "seeker", "key": "shot_cooldown_seconds", "values": [0.5, 1.0, 1.5, 2.5, 3.5, 5.0], "suffix": "s"},
 		{"type": "setting", "label": "Prop count", "section": "objects", "key": "decoy_count", "values": [30, 50, 75, 100, 125], "suffix": ""},
 		{"type": "setting", "label": "Timer ends hunt", "section": "round", "key": "end_on_seek_timeout", "values": [false, true], "labels": ["Off", "On"], "suffix": ""},
@@ -148,11 +149,11 @@ func _rebuild_visuals() -> void:
 	var title := Label3D.new()
 	title.name = "Title"
 	title.text = "HIDEFALL SETTINGS"
-	title.font_size = 20
-	title.outline_size = 5
-	title.pixel_size = 0.00115
+	title.font_size = 15
+	title.outline_size = 4
+	title.pixel_size = 0.00090
 	title.width = 1180.0
-	title.position = Vector3(-0.385, 0.345, 0.006)
+	title.position = Vector3(-0.275, 0.258, 0.006)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	title.modulate = Color(0.25, 0.92, 1.0, 1.0)
 	add_child(title)
@@ -171,11 +172,11 @@ func _rebuild_visuals() -> void:
 
 		var label := Label3D.new()
 		label.name = "Row%dLabel" % index
-		label.font_size = 15
-		label.outline_size = 4
-		label.pixel_size = 0.00105
-		label.width = 1160.0
-		label.position = Vector3(-0.375, y + 0.012, 0.01)
+		label.font_size = 12
+		label.outline_size = 3
+		label.pixel_size = 0.00080
+		label.width = 1400.0
+		label.position = Vector3(-0.272, y + 0.009, 0.01)
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		label.modulate = Color(0.93, 0.98, 1.0, 1.0)
@@ -185,11 +186,11 @@ func _rebuild_visuals() -> void:
 	var help := Label3D.new()
 	help.name = "Help"
 	help.text = "Y/M toggle menu   Right pointer + trigger selects\nTrigger shoots, grip grabs, A scans when this menu is closed"
-	help.font_size = 11
-	help.outline_size = 3
-	help.pixel_size = 0.00095
-	help.width = 1180.0
-	help.position = Vector3(-0.385, -0.335, 0.006)
+	help.font_size = 9
+	help.outline_size = 2
+	help.pixel_size = 0.00072
+	help.width = 1400.0
+	help.position = Vector3(-0.275, -0.272, 0.006)
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	help.modulate = Color(0.72, 0.82, 0.95, 1.0)
 	add_child(help)
@@ -237,6 +238,8 @@ func _set_hovered(index: int) -> void:
 
 
 func _nearest_value_index(values: Array, current: Variant) -> int:
+	if current is String:
+		return maxi(0, values.find(current))
 	var best_index := 0
 	var best_distance := INF
 	for index in values.size():

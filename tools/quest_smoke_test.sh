@@ -113,9 +113,15 @@ if [[ -z "${pid}" ]]; then
   exit 1
 fi
 
-if grep -Eiq 'FATAL EXCEPTION|SIGSEGV|SIGABRT|native crash|ANR in|OpenXR: Failed|XR_ERROR|Unable to create DisplayServer|Couldn'\''t create a Vulkan device|VulkanHooks singleton' "${LOG_FILE}"; then
+# Horizon's OpenXRHelpers logs a transient "xrResume ... XR_ERROR_HANDLE_INVALID"
+# from a *system* pid while the previous app instance is torn down during
+# install-over; only treat xrResume errors as failures when our own pid logs them.
+all_markers="$(grep -Ein 'FATAL EXCEPTION|SIGSEGV|SIGABRT|native crash|ANR in|OpenXR: Failed|XR_ERROR|Unable to create DisplayServer|Couldn'\''t create a Vulkan device|VulkanHooks singleton' "${LOG_FILE}" || true)"
+crash_markers="$(printf '%s\n' "${all_markers}" | { grep -Ev 'OpenXR error: xrResume_' || true; })"
+own_resume_markers="$(printf '%s\n' "${all_markers}" | { grep -E 'OpenXR error: xrResume_' || true; } | { grep -E "[[:space:]]${pid}[[:space:]]" || true; })"
+if [[ -n "${crash_markers//[$'\n\t ']/}" || -n "${own_resume_markers//[$'\n\t ']/}" ]]; then
 	echo "Quest smoke failed: crash/error markers found in ${LOG_FILE}" >&2
-	grep -Ein 'FATAL EXCEPTION|SIGSEGV|SIGABRT|native crash|ANR in|OpenXR: Failed|XR_ERROR|Unable to create DisplayServer|Couldn'\''t create a Vulkan device|VulkanHooks singleton' "${LOG_FILE}" >&2 || true
+	printf '%s\n%s\n' "${crash_markers}" "${own_resume_markers}" >&2
 	exit 1
 fi
 

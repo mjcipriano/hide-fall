@@ -1,5 +1,6 @@
 {
   "round": {
+    "mode": "one_shot",
     "room_setup_seconds": 5,
     "object_rain_seconds": 10,
     "seek_seconds": 90,
@@ -34,6 +35,10 @@
     "dash_cooldown_seconds": 3.5,
     "mimic_radius_meters": 0.75,
     "mimic_cooldown_seconds": 5.0,
+    "earthquake_enabled": true,
+    "earthquake_uses": 1,
+    "earthquake_power": 1.0,
+    "ping_cooldown_seconds": 4.0,
     "abilities_enabled": false,
     "cannot_move_while_held": true,
     "bot_decision_seconds": 1.6,

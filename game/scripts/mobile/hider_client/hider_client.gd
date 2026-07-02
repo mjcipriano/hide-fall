@@ -94,6 +94,9 @@ var info_label: Label
 var joystick_area: Control
 var dash_button: Button
 var mimic_button: Button
+var quake_button: Button
+var ping_button: Button
+var last_body_object_id := ""
 var color_button: Button
 var shape_button: Button
 var ready_button: Button
@@ -213,6 +216,12 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 	cooldowns = snapshot.get("cooldowns", {})
 	hider_state = snapshot.get("hider_state", {})
 	seeker_info = snapshot.get("seeker", {})
+	# Endless mode: our body changed during the hunt, so we were found and rehomed.
+	var body_id := String(hider_state.get("object_id", ""))
+	if joined and bool(hider_state.get("alive", false)) and current_phase == "seek":
+		if not last_body_object_id.is_empty() and not body_id.is_empty() and body_id != last_body_object_id:
+			host_message = "FOUND! New body: %s" % String(hider_state.get("shape", "?"))
+	last_body_object_id = body_id
 	_sync_world_props()
 	_update_status()
 
@@ -331,6 +340,16 @@ func _request_dash() -> void:
 
 func _request_mimic() -> void:
 	pending_ability = "mimic"
+	_send_immediate_input()
+
+
+func _request_quake() -> void:
+	pending_ability = "earthquake"
+	_send_immediate_input()
+
+
+func _request_ping() -> void:
+	pending_ability = "ping"
 	_send_immediate_input()
 
 
@@ -877,37 +896,39 @@ func _build_game_ui() -> void:
 
 	var buttons := VBoxContainer.new()
 	buttons.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	buttons.offset_left = -214.0
-	buttons.offset_top = -360.0
+	buttons.offset_left = -246.0
+	buttons.offset_top = -300.0
 	buttons.offset_right = -32.0
 	buttons.offset_bottom = -30.0
 	buttons.add_theme_constant_override("separation", 10)
 	game_panel.add_child(buttons)
 
 	ready_button = _make_button("READY", 22, true)
-	ready_button.custom_minimum_size = Vector2(180, 56)
+	ready_button.custom_minimum_size = Vector2(214, 56)
 	ready_button.pressed.connect(_on_ready_pressed)
 	buttons.add_child(ready_button)
 
-	dash_button = _make_button("DASH", 22, true)
-	dash_button.custom_minimum_size = Vector2(180, 56)
+	var ability_grid := GridContainer.new()
+	ability_grid.columns = 2
+	ability_grid.add_theme_constant_override("h_separation", 10)
+	ability_grid.add_theme_constant_override("v_separation", 10)
+	buttons.add_child(ability_grid)
+
+	dash_button = _make_button("DASH", 18, true)
+	mimic_button = _make_button("MIMIC", 18, false)
+	quake_button = _make_button("QUAKE", 18, false)
+	ping_button = _make_button("PING", 18, false)
+	color_button = _make_button("COLOR", 18, false)
+	shape_button = _make_button("SHAPE", 18, false)
 	dash_button.pressed.connect(_request_dash)
-	buttons.add_child(dash_button)
-
-	mimic_button = _make_button("MIMIC", 22, false)
-	mimic_button.custom_minimum_size = Vector2(180, 56)
 	mimic_button.pressed.connect(_request_mimic)
-	buttons.add_child(mimic_button)
-
-	color_button = _make_button("COLOR", 22, false)
-	color_button.custom_minimum_size = Vector2(180, 56)
+	quake_button.pressed.connect(_request_quake)
+	ping_button.pressed.connect(_request_ping)
 	color_button.pressed.connect(_request_next_color)
-	buttons.add_child(color_button)
-
-	shape_button = _make_button("SHAPE", 22, false)
-	shape_button.custom_minimum_size = Vector2(180, 56)
 	shape_button.pressed.connect(_request_next_shape)
-	buttons.add_child(shape_button)
+	for ability_button in [dash_button, mimic_button, quake_button, ping_button, color_button, shape_button]:
+		ability_button.custom_minimum_size = Vector2(102, 56)
+		ability_grid.add_child(ability_button)
 
 	overlay_label = Label.new()
 	overlay_label.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -1069,10 +1090,15 @@ func _update_status() -> void:
 		ready_button.visible = current_phase == "lobby" and not spectator
 	if dash_button != null:
 		var in_round := current_phase == "object_rain" or current_phase == "seek"
+		var quake_uses := int(hider_state.get("earthquake_uses", 0))
 		dash_button.disabled = not in_round or spectator or float(cooldowns.get("dash", 0.0)) > 0.05
 		mimic_button.disabled = not in_round or spectator or float(cooldowns.get("mimic", 0.0)) > 0.05
+		quake_button.disabled = not in_round or spectator or quake_uses <= 0
+		ping_button.disabled = not in_round or spectator or float(cooldowns.get("ping", 0.0)) > 0.05
 		dash_button.text = "DASH" if float(cooldowns.get("dash", 0.0)) <= 0.05 else "DASH %.0f" % float(cooldowns.get("dash", 0.0))
 		mimic_button.text = "MIMIC" if float(cooldowns.get("mimic", 0.0)) <= 0.05 else "MIMIC %.0f" % float(cooldowns.get("mimic", 0.0))
+		quake_button.text = "QUAKE x%d" % quake_uses if quake_uses > 0 else "QUAKE"
+		ping_button.text = "PING" if float(cooldowns.get("ping", 0.0)) <= 0.05 else "PING %.0f" % float(cooldowns.get("ping", 0.0))
 		color_button.disabled = not in_round or spectator
 		shape_button.disabled = not in_round or spectator
 	if overlay_label != null:

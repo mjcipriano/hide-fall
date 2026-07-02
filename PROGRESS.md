@@ -798,6 +798,38 @@ Implemented for v0.3.3 / code 12:
 - Downloaded assets: `sha256sum -c` passed; `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 tools/verify_android_artifacts.sh` passed.
 - Released Quest APK smoke passed on hardware over wireless adb (192.168.0.253:5555): install-over succeeded, lobby-first marker plus `Hidefall LAN announcer broadcasting on udp/29445`, zero tonemapper/SCRIPT ERROR lines.
 
+## 2026-07-02 Session Plan: v0.3.4 (smaller wrist UI, game modes, endless-hiders, earthquake, spatial pings, better sounds)
+
+User feedback after v0.3.3: the left-hand settings menu is still way too big, and the wrist status board is too big with text overflowing the box. Add a game-mode option: current play is "one-shot" (one life); add "endless-hiders" where a shot hider respawns into another prop body until objects run out — hiders score on movement, seeker on correct finds; game ends when all objects are gone or all shots are spent. Add more interesting sounds. Add hider ability "earthquake" (1 use: every object flies in random directions and falls back, with a good sound). Add a hider ability to emit a short (<1s) spatial sound from their prop, unique per joined player.
+
+### Approach
+
+1. **Wrist UI sizing** (`host_prototype.gd`, `xr_settings_menu.gd`): shrink the settings menu another ~25% (panel ~0.70x0.62, rows 0.040 high) and the wrist status panel to ~0.44x0.24 with smaller fonts and a constrained label width so text stays inside the quad. Trim the wrist text to short lines.
+2. **Game modes**: `round.mode` setting, values `one_shot` (default, current rules) and `endless_hiders`. The wrist menu gains a Mode row (menu rows learn string values + display labels). Endless rules in `shoot_object()`:
+   - Any shot object is destroyed (erased) — the prop pile depletes.
+   - Hit hider: seeker scores a find; the hider's stats (alive_time, distance_moved, ability state) carry over into a random alive decoy body which becomes their new prop (`times_found` increments); if no decoy remains they are eliminated.
+   - Round ends when no live hiders remain, objects run out, or the last shot is spent (existing rule).
+   - The sim emits a `hider_respawn` event; the phone flashes "FOUND! New body" when its object id changes.
+3. **Sim event queue**: `events` array + `drain_events()`; sim appends `earthquake` / `hider_ping` / `hider_respawn` events, host drains each frame to drive audio.
+4. **Earthquake** (`hiders.earthquake_enabled`, 1 use per round via `earthquake_uses` on the hider object, carried across endless respawns): every unheld object gets a random launch velocity (up + sideways) and tumble spin, then falls back and settles normally. Big rumble SFX on the host.
+5. **Spatial pings** (`hiders.ping_cooldown_seconds`, default 4s): ability `ping` emits an event; the host plays a <1s procedurally generated melody through an `AudioStreamPlayer3D` at the prop's position so the seeker hears it from the object. The melody/waveform is seeded from the player id so every joined player sounds distinct.
+6. **Sound pass**: richer layered synthesis for shoot/hit/miss/pickup/drop/empty plus new earthquake/respawn/ping generators (all procedural, no assets).
+7. Mobile: QUAKE + PING buttons (grid layout to fit), quake disabled at 0 uses, ping on cooldown; respawn flash. Tests for modes/earthquake/ping/menu rows; docs (GAME_DESIGN amendment, CONTENT_SCHEMA, NETWORK_PROTOCOL ability values, README, TESTING); version 0.3.4 / code 13; build, smoke, release.
+
+### Status
+
+Implemented for v0.3.4 / code 13:
+
+- Settings menu shrunk again (panel 0.66x0.62, rows 0.038, smaller fonts) and gained a Mode row; menu rows now support string values with display labels. Wrist status panel shrunk to 0.40x0.155 with 12px text, short fixed-width lines, and autowrap off so nothing spills out of the quad (`_phase_short_text()` provides compact phase lines).
+- `round.mode` (`one_shot` / `endless_hiders`); endless implemented in `shoot_object()` + `_respawn_hider_into_decoy()` (shot objects destroyed, stats/ability charges carried into a random surviving decoy, `times_found` per player, elimination when no bodies remain, round also ends when objects run out). Snapshot carries `mode`; phone flashes "FOUND! New body" when its `object_id` changes mid-seek.
+- Sim event queue (`events` + `drain_events()`); host `_process_simulation_events()` turns `earthquake`/`hider_respawn`/`hider_ping` into audio.
+- Earthquake ability (`hiders.earthquake_enabled/uses/power`): every unheld prop gets a random launch velocity + tumble spin, settles normally afterwards. One use per round, carried across endless respawns.
+- Ping ability (`hiders.ping_cooldown_seconds` 4s): host plays a <1s jingle via `AudioStreamPlayer3D` at the prop; waveform + pentatonic melody seeded from the player id (cached per player, auto-freed after playing).
+- Sound pass: layered shoot zap with sub-thump, two-blip pickup, felt thud drop, three-note hit arpeggio, womp-womp miss, respawn ladder chime, 1.3s integrated-noise earthquake rumble.
+- Mobile: ability buttons rearranged into a 2x3 grid (DASH/MIMIC/QUAKE/PING/COLOR/SHAPE) under READY; QUAKE shows remaining uses, PING shows cooldown.
+- Smoke script hardening: `xrResume XR_ERROR_HANDLE_INVALID` from *system* pids (previous instance teardown during install-over) no longer fails the smoke; the same error from the app pid still does.
+- Verification: `make test` passes (266 assertions incl. endless mode, earthquake/ping, menu mode row, host ping-stream uniqueness/caching, mobile quake/ping requests); upload-signed `make build-apks` + enforced `verify-apks` pass; Quest hardware smoke passes (lobby marker, announcer, zero tonemapper/SCRIPT ERROR).
+
 ## Next
 
 1. Install `hidefall-mobile-0.3.3.apk` on the Android phone and verify fullscreen, snappier joystick movement, Dash, and Mimic in a real joined round.

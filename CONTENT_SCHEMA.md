@@ -16,6 +16,7 @@ Durations are seconds. Object counts are integers. Cooldowns are seconds.
 
 Currently used gameplay settings include:
 
+- `round.mode` — `one_shot` (found hiders are out) or `endless_hiders` (found hiders respawn into surviving decoy bodies; every shot object is destroyed).
 - `round.object_rain_seconds`
 - `round.room_setup_seconds`
 - `round.seek_seconds`
@@ -33,6 +34,8 @@ Currently used gameplay settings include:
 - `hiders.movement_speed`
 - `hiders.shape_change_cooldown`
 - `hiders.color_change_cooldown`
+- `hiders.earthquake_enabled` / `hiders.earthquake_uses` / `hiders.earthquake_power` — one-use room-shaking ability.
+- `hiders.ping_cooldown_seconds` — cooldown for the spatial taunt jingle.
 - `hiders.bot_decision_seconds`
 - `network.port`
 - `network.discovery_port` — UDP port for the LAN game beacon (must differ from `network.port`).

@@ -45,6 +45,7 @@ var held_offset_from := Vector3.ZERO
 var held_offset_to := Vector3.ZERO
 var held_offset_t := 1.0
 var sfx_players: Dictionary = {}
+var ping_streams: Dictionary = {}
 
 var camera: Camera3D
 var xr_origin: XROrigin3D
@@ -95,6 +96,7 @@ func _process(delta: float) -> void:
 	_update_xr_pointer_dot()
 	_update_settings_menu_pointer()
 	simulation.advance(delta)
+	_process_simulation_events()
 	if _is_xr_active() and not launch_gameplay_logged and simulation.objects.size() > 0:
 		_log_visible_gameplay_state()
 	_send_periodic_snapshots(delta)
@@ -305,18 +307,19 @@ func _build_hand_menu() -> void:
 	var wrist_panel := MeshInstance3D.new()
 	wrist_panel.name = "WristPanel"
 	var wrist_mesh := QuadMesh.new()
-	wrist_mesh.size = Vector2(0.64, 0.36)
+	wrist_mesh.size = Vector2(0.40, 0.155)
 	wrist_panel.mesh = wrist_mesh
 	wrist_panel.material_override = _hud_panel_material(Color(0.01, 0.03, 0.05, 0.86))
 	xr_hand_menu_root.add_child(wrist_panel)
 
 	xr_hand_menu_label = Label3D.new()
 	xr_hand_menu_label.name = "WristText"
-	xr_hand_menu_label.font_size = 22
-	xr_hand_menu_label.outline_size = 5
-	xr_hand_menu_label.pixel_size = 0.0016
-	xr_hand_menu_label.width = 360.0
-	xr_hand_menu_label.position = Vector3(-0.29, 0.13, 0.004)
+	xr_hand_menu_label.font_size = 12
+	xr_hand_menu_label.outline_size = 3
+	xr_hand_menu_label.pixel_size = 0.00080
+	xr_hand_menu_label.width = 470.0
+	xr_hand_menu_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	xr_hand_menu_label.position = Vector3(-0.185, 0.062, 0.004)
 	xr_hand_menu_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	xr_hand_menu_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 	xr_hand_menu_label.modulate = Color(0.9, 1.0, 1.0, 1.0)
@@ -470,7 +473,7 @@ func _update_hud() -> void:
 
 
 # The wrist panel is the seeker's only status readout now that the head-locked
-# HUD is gone: phase, timer, gun state, scans, props, and how phones join.
+# HUD is gone. Lines stay short so the text never spills out of the small quad.
 func _update_hand_menu() -> void:
 	if xr_hand_menu_root == null or xr_hand_menu_label == null:
 		return
@@ -479,9 +482,9 @@ func _update_hand_menu() -> void:
 	if simulation.shots_remaining <= 0:
 		gun_text = "EMPTY"
 	elif simulation.shot_cooldown_remaining > 0.0:
-		gun_text = "cooling %.1fs" % simulation.shot_cooldown_remaining
-	xr_hand_menu_label.text = "%s\nTime %.0f  Shots %d (%s)\nScans %d  Props %d  Live %d\nPhones join via Wi-Fi\nRoom %s  %s" % [
-		_phase_instruction_text(),
+		gun_text = "wait %.1f" % simulation.shot_cooldown_remaining
+	xr_hand_menu_label.text = "%s\nTime %.0f  Shots %d (%s)\nScans %d  Props %d  Live %d\nPhones join over Wi-Fi\nRoom %s  %s" % [
+		_phase_short_text(),
 		float(simulation.get_state_snapshot(local_hider_id)["time_remaining"]),
 		simulation.shots_remaining,
 		gun_text,
@@ -491,6 +494,22 @@ func _update_hand_menu() -> void:
 		simulation.room_id,
 		host_ip
 	]
+
+
+# Compact phase line for the small wrist panel.
+func _phase_short_text() -> String:
+	match simulation.phase:
+		HidefallSimulationScript.PHASE_LOBBY:
+			return "LOBBY - Y menu to start"
+		HidefallSimulationScript.PHASE_ROOM_SETUP:
+			return "SETUP - A to confirm"
+		HidefallSimulationScript.PHASE_OBJECT_RAIN:
+			return "PROPS FALLING"
+		HidefallSimulationScript.PHASE_SEEK:
+			return "HUNT - misses cost ammo"
+		HidefallSimulationScript.PHASE_RESULTS:
+			return "ROUND OVER - A replays"
+	return "HIDEFALL"
 
 
 func get_join_payload_text() -> String:
@@ -954,7 +973,7 @@ func _flash_crosshair(color: Color) -> void:
 
 
 func _setup_audio() -> void:
-	for key in ["shoot", "pickup", "drop", "hit", "miss", "empty"]:
+	for key in ["shoot", "pickup", "drop", "hit", "miss", "empty", "respawn", "earthquake"]:
 		var player := AudioStreamPlayer.new()
 		player.name = "Sfx_" + key
 		player.stream = _make_sfx(key)
@@ -969,27 +988,111 @@ func _play_sfx(sfx_name: String) -> void:
 		player.play()
 
 
+# Turns queued simulation happenings into audio: room-shaking earthquakes,
+# per-player spatial taunt pings, and endless-mode respawn chimes.
+func _process_simulation_events() -> void:
+	for event in simulation.drain_events():
+		match String(event.get("type", "")):
+			"earthquake":
+				_play_sfx("earthquake")
+			"hider_respawn":
+				_play_sfx("respawn")
+			"hider_ping":
+				_play_spatial_ping(event)
+
+
+# The taunt plays from the hider's prop so the seeker can hunt by ear; each
+# player gets their own unique jingle.
+func _play_spatial_ping(event: Dictionary) -> void:
+	var speaker := AudioStreamPlayer3D.new()
+	speaker.name = "PingVoice"
+	speaker.stream = _player_ping_stream(String(event.get("player_id", "")))
+	speaker.unit_size = 3.0
+	speaker.max_db = 0.0
+	add_child(speaker)
+	speaker.global_position = event.get("position", Vector3.ZERO)
+	speaker.finished.connect(speaker.queue_free)
+	speaker.play()
+
+
+func _player_ping_stream(player_id: String) -> AudioStreamWAV:
+	if ping_streams.has(player_id):
+		return ping_streams[player_id]
+	var stream := _make_player_ping(player_id)
+	ping_streams[player_id] = stream
+	return stream
+
+
+# A distinct sub-second jingle per player: the player id seeds the waveform and
+# a three-note pentatonic melody, so "who pinged" is learnable by ear.
+func _make_player_ping(player_id: String) -> AudioStreamWAV:
+	var seed_value := int(hash(player_id))
+	var pentatonic := [0, 2, 4, 7, 9, 12]
+	var notes: Array[float] = []
+	for note_index in 3:
+		var step: int = pentatonic[absi(seed_value >> (note_index * 4)) % pentatonic.size()]
+		notes.append(392.0 * pow(2.0, (float(step) + float(absi(seed_value) % 5)) / 12.0))
+	var waveform := absi(seed_value) % 3
+	var mix_rate := 22050
+	var note_seconds := 0.14
+	var gap_seconds := 0.04
+	var duration := notes.size() * (note_seconds + gap_seconds)
+	var sample_count := int(mix_rate * duration)
+	var data := PackedByteArray()
+	data.resize(sample_count * 2)
+	for i in sample_count:
+		var t := float(i) / mix_rate
+		var slot := int(t / (note_seconds + gap_seconds))
+		var t_in_slot := t - slot * (note_seconds + gap_seconds)
+		var sample := 0.0
+		if slot < notes.size() and t_in_slot < note_seconds:
+			var frequency: float = notes[slot]
+			var note_progress := t_in_slot / note_seconds
+			sample = _oscillate(waveform, frequency, t) + 0.25 * _oscillate(waveform, frequency * 2.0, t)
+			sample *= sin(PI * note_progress)
+		var value := int(clampf(sample * 0.55, -1.0, 1.0) * 32767.0)
+		data.encode_s16(i * 2, value)
+	return _wrap_wav(data, mix_rate)
+
+
+func _oscillate(waveform: int, frequency: float, t: float) -> float:
+	var cycle_phase := fmod(frequency * t, 1.0)
+	match waveform:
+		1:
+			# triangle
+			return 4.0 * absf(cycle_phase - 0.5) - 1.0
+		2:
+			# soft square
+			return 0.7 if cycle_phase < 0.5 else -0.7
+	return sin(TAU * cycle_phase)
+
+
 # Procedurally synthesizes short 16-bit sound effects so the build needs no
-# bundled audio assets.
+# bundled audio assets. Layered oscillators + noise for a toy-arcade feel.
 func _make_sfx(kind: String) -> AudioStreamWAV:
 	var mix_rate := 22050
 	var duration := 0.2
 	match kind:
 		"pickup":
-			duration = 0.09
+			duration = 0.12
 		"drop":
-			duration = 0.14
+			duration = 0.16
 		"shoot":
-			duration = 0.22
+			duration = 0.24
 		"hit":
-			duration = 0.3
+			duration = 0.42
 		"miss":
-			duration = 0.22
+			duration = 0.32
 		"empty":
 			duration = 0.08
+		"respawn":
+			duration = 0.42
+		"earthquake":
+			duration = 1.3
 	var sample_count := int(mix_rate * duration)
 	var data := PackedByteArray()
 	data.resize(sample_count * 2)
+	var rumble := 0.0
 	for i in sample_count:
 		var t := float(i) / mix_rate
 		var progress := t / duration
@@ -997,29 +1100,61 @@ func _make_sfx(kind: String) -> AudioStreamWAV:
 		var envelope := 1.0
 		match kind:
 			"shoot":
-				var sweep := lerpf(1500.0, 320.0, progress)
-				sample = sin(TAU * sweep * t) + 0.3 * (randf() * 2.0 - 1.0)
-				envelope = pow(1.0 - progress, 1.5)
+				# Bright zap sweep over a sub-bass thump.
+				var sweep := 1800.0 * pow(0.12, progress)
+				sample = 0.8 * sin(TAU * sweep * t) + 0.35 * sin(TAU * sweep * 1.5 * t)
+				sample += 0.5 * sin(TAU * 85.0 * t) * pow(1.0 - progress, 6.0)
+				sample += 0.18 * (randf() * 2.0 - 1.0) * pow(1.0 - progress, 2.0)
+				envelope = pow(1.0 - progress, 1.4)
 			"pickup":
-				var rise := lerpf(520.0, 900.0, progress)
-				sample = sin(TAU * rise * t)
-				envelope = sin(PI * progress)
+				# Two quick rising blips.
+				var blip_frequency := 540.0 if progress < 0.5 else 810.0
+				sample = sin(TAU * blip_frequency * t) + 0.3 * sin(TAU * blip_frequency * 2.0 * t)
+				envelope = sin(PI * fmod(progress * 2.0, 1.0)) * 0.9
 			"drop":
-				sample = sin(TAU * 140.0 * t) + 0.4 * (randf() * 2.0 - 1.0)
-				envelope = pow(1.0 - progress, 2.0)
+				# Soft thud with a felt-like noise tail.
+				sample = sin(TAU * 110.0 * t) + 0.5 * sin(TAU * 66.0 * t)
+				sample += 0.3 * (randf() * 2.0 - 1.0) * pow(1.0 - progress, 3.0)
+				envelope = pow(1.0 - progress, 2.2)
 			"hit":
-				var chime := lerpf(660.0, 1180.0, progress)
-				sample = sin(TAU * chime * t) + 0.4 * sin(TAU * chime * 2.0 * t)
-				envelope = sin(PI * progress)
+				# Rising three-note victory arpeggio with sparkle.
+				var arpeggio := [660.0, 880.0, 1320.0]
+				var slot := mini(int(progress * 3.0), 2)
+				var note_progress := fmod(progress * 3.0, 1.0)
+				var frequency: float = arpeggio[slot]
+				sample = sin(TAU * frequency * t) + 0.45 * sin(TAU * frequency * 2.0 * t) + 0.2 * sin(TAU * frequency * 3.0 * t)
+				envelope = sin(PI * note_progress) * (0.7 + 0.3 * progress)
 			"miss":
-				sample = (1.0 if sin(TAU * 165.0 * t) >= 0.0 else -1.0) * 0.7
-				envelope = pow(1.0 - progress, 1.2)
+				# Sad descending womp-womp.
+				var womp := (250.0 if progress < 0.5 else 180.0) * (1.0 - 0.25 * fmod(progress * 2.0, 1.0))
+				sample = sin(TAU * womp * t) + 0.4 * sin(TAU * womp * 0.5 * t)
+				envelope = sin(PI * fmod(progress * 2.0, 1.0)) * 0.9
 			"empty":
 				# dry double click for an out-of-ammo trigger pull
 				sample = (1.0 if fmod(t * 900.0, 1.0) < 0.5 else -1.0) * 0.5
 				envelope = pow(1.0 - progress, 4.0)
+			"respawn":
+				# Shimmering upward arpeggio: found, but back in a new body.
+				var ladder := [392.0, 494.0, 587.0, 784.0]
+				var slot := mini(int(progress * 4.0), 3)
+				var note_progress := fmod(progress * 4.0, 1.0)
+				var frequency: float = ladder[slot]
+				sample = sin(TAU * frequency * t) + 0.35 * sin(TAU * frequency * 2.0 * t)
+				sample += 0.15 * sin(TAU * frequency * 4.0 * t + sin(t * 30.0))
+				envelope = sin(PI * note_progress)
+			"earthquake":
+				# Deep integrated-noise rumble with a slow wobble that builds
+				# fast and trails off as the props crash back down.
+				rumble = clampf(rumble * 0.996 + (randf() * 2.0 - 1.0) * 0.09, -1.0, 1.0)
+				sample = rumble * 1.3 + 0.6 * sin(TAU * 42.0 * t + 2.0 * sin(TAU * 5.5 * t))
+				sample *= 0.75 + 0.25 * sin(TAU * 6.0 * t)
+				envelope = minf(progress * 6.0, 1.0) * pow(1.0 - progress, 0.9)
 		var value := int(clampf(sample * envelope * 0.6, -1.0, 1.0) * 32767.0)
 		data.encode_s16(i * 2, value)
+	return _wrap_wav(data, mix_rate)
+
+
+func _wrap_wav(data: PackedByteArray, mix_rate: int) -> AudioStreamWAV:
 	var wav := AudioStreamWAV.new()
 	wav.format = AudioStreamWAV.FORMAT_16_BITS
 	wav.mix_rate = mix_rate

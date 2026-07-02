@@ -59,6 +59,8 @@ Phones bind the discovery port, validate `game == "hidefall"`, take the sender a
 }
 ```
 
+`ability` is `null` or one of `"dash"`, `"mimic"`, `"earthquake"` (one use per round; hurls every prop into the air), `"ping"` (short spatial taunt jingle played from the hider's prop, unique per player). Ability cooldowns/uses come back in the snapshot: `cooldowns` carries `dash`/`mimic`/`ping` seconds, and `hider_state` carries `earthquake_uses` and `times_found`. Snapshots also include the current `mode` (`one_shot` or `endless_hiders`); in endless mode a found hider's `hider_state.object_id` changes to their new body.
+
 ```json
 {
   "type": "ready_state",

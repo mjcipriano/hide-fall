@@ -52,6 +52,8 @@ func _run() -> void:
 	_test_thrown_prop_tumbles()
 	_test_shot_cooldown()
 	_test_shot_economy()
+	_test_endless_hiders_mode()
+	_test_earthquake_and_ping()
 	_test_hider_dash_and_mimic()
 	_test_end_round()
 	_test_hider_preferences()
@@ -497,6 +499,94 @@ func _test_shot_cooldown() -> void:
 	_assert(sim.get_state_snapshot().has("shot_cooldown_remaining"), "snapshot exposes the gun cooldown")
 
 
+func _test_endless_hiders_mode() -> void:
+	var sim = _new_sim(608)
+	sim.config.set_value("round", "mode", "endless_hiders")
+	var player_id := sim.add_hider("Cat")
+	sim.start_round()
+	sim.confirm_room_setup()
+	_advance_for(sim, 20.4)
+	var cooldown := float(sim.config.get_value("seeker", "shot_cooldown_seconds", 2.5)) + 0.2
+	sim.drain_events()
+	var first_body: String = sim.players[player_id]["object_id"]
+	var objects_before: int = sim.objects.size()
+	var hit := sim.shoot_object(first_body)
+	_assert(hit.get("hit", false), "endless: hit on the hider lands")
+	_assert(bool(sim.players[player_id]["alive"]), "endless: found hider stays alive")
+	var second_body: String = sim.players[player_id]["object_id"]
+	_assert(second_body != first_body and sim.objects.has(second_body), "endless: hider respawns into another body")
+	_assert(not sim.objects.has(first_body), "endless: the shot body is destroyed")
+	_assert(sim.objects.size() == objects_before - 1, "endless: the prop pile depletes on hits")
+	_assert(bool(sim.objects[second_body]["is_hider"]), "endless: the new body belongs to the hider")
+	_assert(int(sim.players[player_id]["times_found"]) == 1, "endless: seeker finds are counted per player")
+	var respawned := false
+	for event in sim.drain_events():
+		if String(event.get("type", "")) == "hider_respawn":
+			respawned = true
+	_assert(respawned, "endless: respawn event is emitted for host feedback")
+	_assert(sim.phase == HidefallSimulationScript.PHASE_SEEK, "endless: round continues after a find")
+	_advance_for(sim, cooldown)
+	var decoy: String = sim.get_decoy_object_ids()[0]
+	sim.shoot_object(decoy)
+	_assert(not sim.objects.has(decoy), "endless: a missed decoy is destroyed too")
+	for _extra_miss in 2:
+		_advance_for(sim, cooldown)
+		sim.shoot_object(sim.get_decoy_object_ids()[0])
+	_assert(sim.shots_remaining == 0, "endless: misses spend the ammo")
+	_assert(sim.phase == HidefallSimulationScript.PHASE_RESULTS, "endless: round ends when shots run out")
+	# When no decoy bodies remain, a found hider is out and the round ends.
+	var drained = _new_sim(609)
+	drained.config.set_value("round", "mode", "endless_hiders")
+	drained.config.set_value("objects", "decoy_count", 1)
+	var lone_id := drained.add_hider("Lone")
+	drained.start_round()
+	drained.confirm_room_setup()
+	_advance_for(drained, 20.4)
+	drained.shoot_object(drained.players[lone_id]["object_id"])
+	_assert(bool(drained.players[lone_id]["alive"]), "endless: hider rehomes into the last decoy")
+	_advance_for(drained, cooldown)
+	drained.shoot_object(drained.players[lone_id]["object_id"])
+	_assert(not bool(drained.players[lone_id]["alive"]), "endless: hider with no bodies left is eliminated")
+	_assert(drained.phase == HidefallSimulationScript.PHASE_RESULTS, "endless: round ends when the prop pile is gone")
+
+
+func _test_earthquake_and_ping() -> void:
+	var sim = _new_sim(610)
+	var player_id := sim.add_hider("Shaker")
+	sim.start_round()
+	sim.confirm_room_setup()
+	_advance_for(sim, 20.4)
+	sim.drain_events()
+	var object_id: String = sim.players[player_id]["object_id"]
+	_assert(int(sim.objects[object_id]["earthquake_uses"]) == 1, "hider spawns with one earthquake use")
+	_assert(sim.apply_hider_input(player_id, {"move": [0.0, 0.0], "ability": "earthquake"}), "earthquake input accepted")
+	_assert(int(sim.objects[object_id]["earthquake_uses"]) == 0, "earthquake consumes its single use")
+	var decoy: String = sim.get_decoy_object_ids()[0]
+	_assert((sim.objects[decoy]["velocity"] as Vector3).y > 1.0, "earthquake launches props into the air")
+	var quaked := false
+	for event in sim.drain_events():
+		if String(event.get("type", "")) == "earthquake":
+			quaked = true
+	_assert(quaked, "earthquake event is emitted for the host sound")
+	sim.apply_hider_input(player_id, {"move": [0.0, 0.0], "ability": "earthquake"})
+	_assert(sim.drain_events().is_empty(), "a second earthquake is rejected once uses are spent")
+	_advance_for(sim, 8.0)
+	_assert((sim.objects[decoy]["position"] as Vector3).y < 1.0, "props fall back down after the quake")
+	# Spatial taunt ping: emitted at the prop's position, unique per player.
+	sim.apply_hider_input(player_id, {"move": [0.0, 0.0], "ability": "ping"})
+	var ping_position := Vector3.ZERO
+	var pinged := false
+	for event in sim.drain_events():
+		if String(event.get("type", "")) == "hider_ping" and String(event.get("player_id", "")) == player_id:
+			pinged = true
+			ping_position = event.get("position", Vector3.ZERO)
+	_assert(pinged, "ping event is emitted with the player id")
+	_assert(ping_position.distance_to(sim.objects[object_id]["position"]) < 0.5, "ping event carries the prop's position")
+	_assert(float(sim.objects[object_id]["ping_cooldown"]) > 0.0, "ping starts its cooldown")
+	sim.apply_hider_input(player_id, {"move": [0.0, 0.0], "ability": "ping"})
+	_assert(sim.drain_events().is_empty(), "ping cooldown blocks immediate repeats")
+
+
 func _test_hider_dash_and_mimic() -> void:
 	var sim = _new_sim(607)
 	var player_id := sim.add_hider("Dasher")
@@ -585,21 +675,28 @@ func _test_xr_settings_menu() -> void:
 	menu.setup(config)
 	root.add_child(menu)
 	menu.set_open(true)
-	_assert(menu.get_row_count() >= 10, "XR settings menu builds action and setting rows")
-	_assert(menu.get_row_label(2).contains("Gun cooldown"), "XR settings menu shows gun cooldown row")
-	_assert(menu.get_row_label(4).contains("Timer ends hunt: Off"), "XR settings menu shows the hunt timer toggle defaulting off")
+	_assert(menu.get_row_count() >= 11, "XR settings menu builds action and setting rows")
+	_assert(menu.get_row_label(2).contains("Mode: One-shot"), "XR settings menu shows the game mode row defaulting to one-shot")
+	_assert(menu.get_row_label(3).contains("Gun cooldown"), "XR settings menu shows gun cooldown row")
+	_assert(menu.get_row_label(5).contains("Timer ends hunt: Off"), "XR settings menu shows the hunt timer toggle defaulting off")
 	var has_blackout_row := false
 	for index in menu.get_row_count():
 		if menu.get_row_label(index).contains("Blackout"):
 			has_blackout_row = true
 	_assert(not has_blackout_row, "XR settings menu no longer offers a blackout setting")
+	menu.force_hover(2)
+	menu.activate_hovered()
+	_assert(String(config.get_value("round", "mode", "")) == "endless_hiders", "mode row cycles to endless hiders")
+	_assert(menu.get_row_label(2).contains("Endless hiders"), "mode row label shows the new mode")
+	menu.activate_hovered()
+	_assert(String(config.get_value("round", "mode", "")) == "one_shot", "mode row cycles back to one-shot")
 	var changed := {"section": "", "key": "", "value": null}
 	menu.setting_changed.connect(func(section, key, value) -> void:
 		changed["section"] = section
 		changed["key"] = key
 		changed["value"] = value
 	)
-	var hovered := menu.update_pointer(Vector3(0.0, 0.151, 1.0), Vector3(0.0, 0.0, -1.0))
+	var hovered := menu.update_pointer(Vector3(0.0, 0.0775, 1.0), Vector3(0.0, 0.0, -1.0))
 	_assert(hovered, "XR settings menu pointer intersects the panel")
 	_assert(menu.activate_hovered(), "XR settings menu activates hovered setting row")
 	_assert(changed.get("section", "") == "seeker" and changed.get("key", "") == "shot_cooldown_seconds", "XR settings menu emits setting change")
@@ -672,7 +769,7 @@ func _test_host_scene_smoke() -> void:
 	_assert(scene.simulation != null, "host scene creates simulation")
 	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_LOBBY, "host scene starts in lobby")
 	_assert(scene.settings_menu != null, "host scene creates settings menu")
-	scene.settings_menu.force_hover(2)
+	scene.settings_menu.force_hover(3)
 	scene.settings_menu.activate_hovered()
 	_assert(absf(float(scene.config.get_value("seeker", "shot_cooldown_seconds", 0.0)) - 3.5) < 0.001, "host settings menu updates config")
 	var bot_count_before: int = scene.simulation.players.size()
@@ -777,6 +874,21 @@ func _test_host_scene_smoke() -> void:
 	var scan_before: int = scene.simulation.scan_pulses_remaining
 	scene._use_scan_pulse()
 	_assert(scene.simulation.scan_pulses_remaining == max(0, scan_before - 1), "host scan pulse consumes pulse")
+	# Procedural audio: new effects exist and per-player pings are short + unique.
+	_assert(scene._make_sfx("earthquake").data.size() > 20000, "host synthesizes an earthquake rumble")
+	_assert(scene._make_sfx("respawn").data.size() > 2000, "host synthesizes a respawn chime")
+	var ping_a: AudioStreamWAV = scene._player_ping_stream("p1")
+	var ping_b: AudioStreamWAV = scene._player_ping_stream("p2")
+	_assert(ping_a.data.size() / 2.0 / float(ping_a.mix_rate) < 1.0, "player ping is shorter than one second")
+	_assert(ping_a.data != ping_b.data, "each player gets a unique ping jingle")
+	_assert(scene._player_ping_stream("p1") == ping_a, "player ping streams are cached")
+	scene.simulation.events.append({"type": "hider_ping", "player_id": "p1", "position": Vector3(1.0, 0.2, 0.5)})
+	scene._process_simulation_events()
+	var ping_voices := 0
+	for child in scene.get_children():
+		if child is AudioStreamPlayer3D:
+			ping_voices += 1
+	_assert(ping_voices >= 1, "hider ping spawns a spatial voice at the prop")
 	root.remove_child(scene)
 	scene.free()
 	await process_frame
@@ -833,6 +945,12 @@ func _test_mobile_scene_smoke() -> void:
 	scene._request_mimic()
 	var mimic_input: Dictionary = scene.build_hider_input()
 	_assert(mimic_input["ability"] == "mimic", "mobile mimic button queues mimic ability")
+	scene._request_quake()
+	var quake_input: Dictionary = scene.build_hider_input()
+	_assert(quake_input["ability"] == "earthquake", "mobile quake button queues the earthquake ability")
+	scene._request_ping()
+	var ping_input: Dictionary = scene.build_hider_input()
+	_assert(ping_input["ability"] == "ping", "mobile ping button queues the spatial ping ability")
 	scene.apply_snapshot({
 		"type": "state_snapshot",
 		"version": 1,
