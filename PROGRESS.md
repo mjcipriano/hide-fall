@@ -830,10 +830,17 @@ Implemented for v0.3.4 / code 13:
 - Smoke script hardening: `xrResume XR_ERROR_HANDLE_INVALID` from *system* pids (previous instance teardown during install-over) no longer fails the smoke; the same error from the app pid still does.
 - Verification: `make test` passes (266 assertions incl. endless mode, earthquake/ping, menu mode row, host ping-stream uniqueness/caching, mobile quake/ping requests); upload-signed `make build-apks` + enforced `verify-apks` pass; Quest hardware smoke passes (lobby marker, announcer, zero tonemapper/SCRIPT ERROR).
 
+## 2026-07-02 v0.3.4 Release Verification
+
+- Master Test And Build run `28567922293` passed for commit `7fcb0f5`.
+- Tagged and pushed `v0.3.4`; Release and tag Test And Build runs both passed.
+- GitHub Release `Hidefall 0.3.4` published 2026-07-02T05:42:54Z with `hidefall-quest-0.3.4.apk`, `hidefall-mobile-0.3.4.apk`, `SHA256SUMS`.
+- Downloaded assets: `sha256sum -c` passed; `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 tools/verify_android_artifacts.sh` passed.
+- Released Quest APK smoke passed on hardware over wireless adb (192.168.0.253:5555): install-over succeeded, lobby-first marker plus announcer line, zero tonemapper/SCRIPT ERROR lines. The smoke script now ignores system-pid `xrResume` teardown noise (still fails when the app pid logs it).
+
 ## Next
 
-1. Install `hidefall-mobile-0.3.3.apk` on the Android phone and verify fullscreen, snappier joystick movement, Dash, and Mimic in a real joined round.
-2. In headset, feel-check the smaller wrist settings menu, the clean (no head panel) seeker view, rain-straight-to-hunt flow, and the miss-only ammo economy; tune `seeker.shot_cooldown_seconds` / bullets from the menu if rounds end too fast.
+1. Install `hidefall-mobile-0.3.4.apk` on the Android phone and verify in a real round: fullscreen, snappy joystick, Dash, Mimic, Quake (props fly + rumble on the headset), Ping (seeker hears your jingle from your prop), and the endless-hiders respawn flash.
+2. In headset, feel-check: smaller wrist menu + status panel (text fits now), the two game modes (switch Mode in the wrist menu, restart round), earthquake chaos, and whether per-player ping jingles are distinguishable. Tune `hiders.ping_cooldown_seconds` / `earthquake_power` if abilities feel too strong or weak.
 3. Non-blocking cleanup: update GitHub Actions setup-miniconda options to remove `auto-activate-base` and implicit `defaults` channel annotations.
 4. iOS build path remains untested.
-5. Note for the smoke script: a transient `xrResume XR_ERROR_HANDLE_INVALID` from a system pid can appear in logcat while the previous app instance is torn down during install-over; rerun before treating it as a real failure (or scope the OpenXR error grep to the app pid).
