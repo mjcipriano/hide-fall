@@ -790,9 +790,18 @@ Implemented for v0.3.3 / code 12:
 - Docs: GAME_DESIGN.md gained an "Implementation amendments" preamble recording these deviations as authoritative; CONTENT_SCHEMA/README/TESTING updated.
 - Local verification: `make test` passes (228 assertions incl. new shot-economy and timer-toggle tests); upload-signed `make build-apks` + `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 make verify-apks` pass; Quest hardware smoke passes over wireless adb with the lobby-first marker and the announcer line, zero tonemapper/SCRIPT ERROR lines. (One smoke run flagged a transient `xrResume XR_ERROR_HANDLE_INVALID` from a *system* pid emitted while the previous app instance was torn down during install-over; the rerun was clean — a known false-positive pattern to keep in mind for the smoke grep.)
 
+## 2026-07-02 v0.3.3 Release Verification
+
+- Master Test And Build run `28565882105` passed for commit `69f47fb`.
+- Tagged and pushed `v0.3.3`; Release run `28566038311` and tag Test And Build run `28566038235` both passed.
+- GitHub Release `Hidefall 0.3.3` published 2026-07-02T04:50:02Z with `hidefall-quest-0.3.3.apk`, `hidefall-mobile-0.3.3.apk`, `SHA256SUMS`.
+- Downloaded assets: `sha256sum -c` passed; `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 tools/verify_android_artifacts.sh` passed.
+- Released Quest APK smoke passed on hardware over wireless adb (192.168.0.253:5555): install-over succeeded, lobby-first marker plus `Hidefall LAN announcer broadcasting on udp/29445`, zero tonemapper/SCRIPT ERROR lines.
+
 ## Next
 
-1. Install `hidefall-mobile-0.3.2.apk` on the Android phone and verify fullscreen, joystick movement, Dash, and Mimic in a real joined round.
-2. In headset, validate that lobby-first flow plus wrist-menu start feels correct and that late phone joins take over bots/decoys as expected.
+1. Install `hidefall-mobile-0.3.3.apk` on the Android phone and verify fullscreen, snappier joystick movement, Dash, and Mimic in a real joined round.
+2. In headset, feel-check the smaller wrist settings menu, the clean (no head panel) seeker view, rain-straight-to-hunt flow, and the miss-only ammo economy; tune `seeker.shot_cooldown_seconds` / bullets from the menu if rounds end too fast.
 3. Non-blocking cleanup: update GitHub Actions setup-miniconda options to remove `auto-activate-base` and implicit `defaults` channel annotations.
 4. iOS build path remains untested.
+5. Note for the smoke script: a transient `xrResume XR_ERROR_HANDLE_INVALID` from a system pid can appear in logcat while the previous app instance is torn down during install-over; rerun before treating it as a real failure (or scope the OpenXR error grep to the app pid).
