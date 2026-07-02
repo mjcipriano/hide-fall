@@ -6,6 +6,13 @@ Here is the full game design document.
 
 # Game Design Document: **Hidefall**
 
+> **Implementation amendments (2026-07-02, v0.3.3).** The shipped game deviates from this document in the following ways, by the owner's direction; where they conflict, the amendments win:
+>
+> 1. **No blackout phase.** The round flow is lobby → (optional room setup) → object rain → seek. Hiders drop from the ceiling together with the decoys during object rain and can steer as they land; there is no vision-darkening stage. `round.blackout_seconds` no longer exists.
+> 2. **Ammo economy.** By default a shot is only consumed on a **miss** (shooting a decoy); hitting a live hider is free (`seeker.consume_shot_on_hit=false`). The round ends when the seeker spends their last shot (`round.end_when_out_of_shots=true`); surviving hiders win. The seek timer does **not** end the round by default (`round.end_on_seek_timeout=false`) — it can be re-enabled from the in-game settings menu.
+> 3. **No head-locked seeker HUD.** Status (phase, timer, shots/gun state, scans, join info) lives on a compact left-wrist panel; a toggleable wrist settings menu (left Y button) carries round actions and all live-tunable settings. QR joining is desktop-only; phones join via LAN discovery or manual entry because a QR rendered inside the headset cannot be scanned.
+> 4. **Hider abilities.** `Freeze` was replaced on phones by `Dash` (burst of speed) and `Mimic` (instantly copy an adjacent decoy's shape/color/pattern), both with cooldowns.
+
 ## 1. High Concept
 
 **Hidefall** is a local mixed-reality party game for Meta Quest 3 and phones. One player wears the Quest headset and becomes the **Seeker**. Other players join from Android or iPhone as **Hiders**, each controlling a disguised object inside the Seeker’s real room.

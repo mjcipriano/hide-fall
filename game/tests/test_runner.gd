@@ -51,6 +51,7 @@ func _run() -> void:
 	_test_rest_modes()
 	_test_thrown_prop_tumbles()
 	_test_shot_cooldown()
+	_test_shot_economy()
 	_test_hider_dash_and_mimic()
 	_test_end_round()
 	_test_hider_preferences()
@@ -88,6 +89,10 @@ func _test_content_loads() -> void:
 	_assert(int(config.get_value("round", "room_setup_seconds", 0)) == 5, "room setup duration loads")
 	_assert(bool(config.get_value("seeker", "scan_pulse_enabled", false)), "scan pulse is enabled in default config")
 	_assert(float(config.get_value("seeker", "shot_cooldown_seconds", 0.0)) > 0.0, "shot cooldown is configured")
+	_assert(not bool(config.get_value("round", "end_on_seek_timeout", true)), "hunt timer does not end rounds by default")
+	_assert(bool(config.get_value("round", "end_when_out_of_shots", false)), "round ends when the seeker spends all shots by default")
+	_assert(not bool(config.get_value("seeker", "consume_shot_on_hit", true)), "hider hits do not consume shots by default")
+	_assert(config.get_value("round", "blackout_seconds", null) == null, "blackout stage setting is removed")
 	_assert(int(config.get_value("network", "discovery_port", 0)) == 29445, "discovery port is configured")
 	_assert(content.get_shape_ids().size() >= 16, "expanded shape set loads")
 	_assert(content.get_color_ids().size() >= 12, "MVP color set loads")
@@ -155,9 +160,7 @@ func _test_phase_transitions() -> void:
 	_assert(sim.confirm_room_setup(), "room setup can be confirmed")
 	_assert(sim.phase == HidefallSimulationScript.PHASE_OBJECT_RAIN, "round starts in object rain")
 	_advance_for(sim, 10.2)
-	_assert(sim.phase == HidefallSimulationScript.PHASE_BLACKOUT, "object rain transitions to blackout")
-	_advance_for(sim, 10.2)
-	_assert(sim.phase == HidefallSimulationScript.PHASE_SEEK, "blackout transitions to seek")
+	_assert(sim.phase == HidefallSimulationScript.PHASE_SEEK, "object rain transitions straight to seek (no blackout)")
 
 
 func _test_hider_input_and_cooldowns() -> void:
@@ -219,9 +222,50 @@ func _test_timeout_results() -> void:
 	var wrong := sim.shoot_object(decoy_id)
 	_assert(wrong.get("accepted", false) and not wrong.get("hit", true), "wrong shot damages decoy")
 	_advance_for(sim, 91.0)
-	_assert(sim.phase == HidefallSimulationScript.PHASE_RESULTS, "seek timeout ends round")
+	_assert(sim.phase == HidefallSimulationScript.PHASE_SEEK, "hunt timer does not end the round by default")
+	sim.config.set_value("round", "end_on_seek_timeout", true)
+	_advance_for(sim, 0.2)
+	_assert(sim.phase == HidefallSimulationScript.PHASE_RESULTS, "seek timeout ends round when the timer setting is on")
 	var results := sim.get_results()
 	_assert(results["hiders"].values()[0] >= 1000, "surviving hider receives survival score")
+
+
+func _test_shot_economy() -> void:
+	var sim = _new_sim(557)
+	var player_id := sim.add_hider("Target")
+	sim.start_round()
+	sim.confirm_room_setup()
+	_advance_for(sim, 20.4)
+	var cooldown := float(sim.config.get_value("seeker", "shot_cooldown_seconds", 2.5)) + 0.2
+	var shots_before: int = sim.shots_remaining
+	_assert(shots_before == 3, "solo hider round starts with base bullets")
+	var decoys := sim.get_decoy_object_ids()
+	# Two misses each consume a shot; the round survives while ammo remains.
+	sim.shoot_object(decoys[0])
+	_assert(sim.shots_remaining == shots_before - 1, "miss against a decoy consumes a shot")
+	_advance_for(sim, cooldown)
+	sim.shoot_object(decoys[1])
+	_advance_for(sim, cooldown)
+	_assert(sim.phase == HidefallSimulationScript.PHASE_SEEK, "round continues while shots remain")
+	# A hit on the live hider is free and ends the round because all are found.
+	var hider_object_id: String = sim.players[player_id]["object_id"]
+	var hit := sim.shoot_object(hider_object_id)
+	_assert(hit.get("hit", false), "hider hit lands")
+	_assert(sim.shots_remaining == 1, "hitting a hider does not consume a shot")
+	_assert(sim.phase == HidefallSimulationScript.PHASE_RESULTS, "finding every hider still ends the round")
+	# Exhausting ammo on decoys ends the round for the seeker.
+	var out_sim = _new_sim(558)
+	out_sim.add_hider("Escapee")
+	out_sim.start_round()
+	out_sim.confirm_room_setup()
+	_advance_for(out_sim, 20.4)
+	var out_decoys := out_sim.get_decoy_object_ids()
+	for shot_index in 3:
+		out_sim.shoot_object(out_decoys[shot_index])
+		_advance_for(out_sim, cooldown)
+	_assert(out_sim.shots_remaining == 0, "three misses spend all base bullets")
+	_assert(out_sim.phase == HidefallSimulationScript.PHASE_RESULTS, "firing the last shot ends the round")
+	_assert(out_sim.get_results()["hiders"].values()[0] >= 1000, "hider outlasting the seeker's ammo survives")
 
 
 func _test_disconnect_and_soak() -> void:
@@ -235,6 +279,8 @@ func _test_disconnect_and_soak() -> void:
 	_assert(disconnect_sim.objects.has(object_id) and not disconnect_sim.objects[object_id]["is_hider"], "disconnect leaves inert decoy")
 	for round_index in 10:
 		var sim = _new_sim(900 + round_index)
+		# Soak rounds must terminate on their own, so turn the hunt timer end on.
+		sim.config.set_value("round", "end_on_seek_timeout", true)
 		sim.add_bot_hiders(3)
 		sim.start_round()
 		sim.confirm_room_setup()
@@ -541,13 +587,19 @@ func _test_xr_settings_menu() -> void:
 	menu.set_open(true)
 	_assert(menu.get_row_count() >= 10, "XR settings menu builds action and setting rows")
 	_assert(menu.get_row_label(2).contains("Gun cooldown"), "XR settings menu shows gun cooldown row")
+	_assert(menu.get_row_label(4).contains("Timer ends hunt: Off"), "XR settings menu shows the hunt timer toggle defaulting off")
+	var has_blackout_row := false
+	for index in menu.get_row_count():
+		if menu.get_row_label(index).contains("Blackout"):
+			has_blackout_row = true
+	_assert(not has_blackout_row, "XR settings menu no longer offers a blackout setting")
 	var changed := {"section": "", "key": "", "value": null}
 	menu.setting_changed.connect(func(section, key, value) -> void:
 		changed["section"] = section
 		changed["key"] = key
 		changed["value"] = value
 	)
-	var hovered := menu.update_pointer(Vector3(0.0, 0.226, 1.0), Vector3(0.0, 0.0, -1.0))
+	var hovered := menu.update_pointer(Vector3(0.0, 0.151, 1.0), Vector3(0.0, 0.0, -1.0))
 	_assert(hovered, "XR settings menu pointer intersects the panel")
 	_assert(menu.activate_hovered(), "XR settings menu activates hovered setting row")
 	_assert(changed.get("section", "") == "seeker" and changed.get("key", "") == "shot_cooldown_seconds", "XR settings menu emits setting change")

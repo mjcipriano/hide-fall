@@ -33,7 +33,7 @@ def validate_settings() -> None:
     path = CONTENT / "settings" / "default.json"
     data = load_json(path)
     require_keys(data, ["round", "objects", "seeker", "hiders", "network"], path)
-    for key in ["object_rain_seconds", "blackout_seconds", "seek_seconds", "results_seconds"]:
+    for key in ["object_rain_seconds", "seek_seconds", "results_seconds"]:
         if data["round"][key] <= 0:
             fail(f"{path} round.{key} must be positive")
     if data["objects"]["decoy_count"] < 20:

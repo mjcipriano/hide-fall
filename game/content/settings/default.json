@@ -2,9 +2,10 @@
   "round": {
     "room_setup_seconds": 5,
     "object_rain_seconds": 10,
-    "blackout_seconds": 10,
     "seek_seconds": 90,
-    "results_seconds": 15
+    "results_seconds": 15,
+    "end_on_seek_timeout": false,
+    "end_when_out_of_shots": true
   },
   "objects": {
     "decoy_count": 75,
@@ -17,6 +18,7 @@
     "base_bullets": 3,
     "bullets_per_hider": 1,
     "shot_cooldown_seconds": 2.5,
+    "consume_shot_on_hit": false,
     "allow_pickup": true,
     "allow_throwing": true,
     "scan_pulse_enabled": true,

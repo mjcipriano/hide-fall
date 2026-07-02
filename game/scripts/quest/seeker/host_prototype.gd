@@ -55,13 +55,7 @@ var help_label: Label
 var qr_label: Label
 var qr_texture_rect: TextureRect
 var crosshair: ColorRect
-var xr_hud_root: Node3D
-var xr_hud_label: Label3D
-var xr_help_label: Label3D
-var xr_join_label: Label3D
 var xr_crosshair: MeshInstance3D
-var xr_phase_label: Label3D
-var xr_blackout_panel: MeshInstance3D
 var xr_hand_menu_root: Node3D
 var xr_hand_menu_label: Label3D
 var settings_menu
@@ -280,85 +274,9 @@ func _build_hud() -> void:
 		_build_settings_menu()
 
 
+# The seeker's view stays clear: no head-locked panels. Everything lives on the
+# left wrist (compact status or the settings menu); only the aim dot floats.
 func _build_xr_hud() -> void:
-	xr_hud_root = Node3D.new()
-	xr_hud_root.name = "XRWorldHud"
-	# Low-centered so it reads like a HUD and stays out of the play space.
-	xr_hud_root.position = Vector3(0.0, -0.46, -1.9)
-	if camera != null:
-		camera.add_child(xr_hud_root)
-	else:
-		add_child(xr_hud_root)
-
-	var status_panel := MeshInstance3D.new()
-	status_panel.name = "StatusPanel"
-	var status_panel_mesh := QuadMesh.new()
-	status_panel_mesh.size = Vector2(1.5, 0.66)
-	status_panel.mesh = status_panel_mesh
-	status_panel.position = Vector3(0.0, 0.0, 0.0)
-	status_panel.material_override = _hud_panel_material(Color(0.02, 0.03, 0.04, 0.72))
-	xr_hud_root.add_child(status_panel)
-
-	xr_phase_label = Label3D.new()
-	xr_phase_label.name = "PhaseText"
-	xr_phase_label.font_size = 30
-	xr_phase_label.outline_size = 8
-	xr_phase_label.pixel_size = 0.0019
-	xr_phase_label.width = 1500.0
-	xr_phase_label.position = Vector3(-0.68, 0.24, 0.01)
-	xr_phase_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	xr_phase_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	xr_phase_label.modulate = Color(1.0, 0.92, 0.35, 1.0)
-	xr_hud_root.add_child(xr_phase_label)
-
-	xr_hud_label = Label3D.new()
-	xr_hud_label.name = "StatusText"
-	xr_hud_label.font_size = 22
-	xr_hud_label.outline_size = 6
-	xr_hud_label.modulate = Color(0.92, 0.98, 1.0, 1.0)
-	xr_hud_label.pixel_size = 0.0019
-	xr_hud_label.width = 1500.0
-	xr_hud_label.position = Vector3(-0.68, 0.0, 0.01)
-	xr_hud_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	xr_hud_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	xr_hud_root.add_child(xr_hud_label)
-
-	xr_help_label = Label3D.new()
-	xr_help_label.name = "HelpText"
-	xr_help_label.font_size = 19
-	xr_help_label.outline_size = 6
-	xr_help_label.modulate = Color(0.80, 0.88, 1.0, 1.0)
-	xr_help_label.pixel_size = 0.0019
-	xr_help_label.width = 1500.0
-	xr_help_label.position = Vector3(-0.68, -0.23, 0.01)
-	xr_help_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	xr_help_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	xr_help_label.text = "Y: settings menu   A: start / scan"
-	xr_hud_root.add_child(xr_help_label)
-
-	# A QR code inside the headset cannot be scanned by a phone, so the XR HUD
-	# shows join info instead; phones discover the game over Wi-Fi automatically.
-	xr_join_label = Label3D.new()
-	xr_join_label.name = "JoinInfo"
-	xr_join_label.font_size = 18
-	xr_join_label.outline_size = 5
-	xr_join_label.pixel_size = 0.0018
-	xr_join_label.width = 620.0
-	xr_join_label.position = Vector3(1.02, 0.06, 0.0)
-	xr_join_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	xr_join_label.modulate = Color(0.85, 0.95, 1.0, 1.0)
-	xr_hud_root.add_child(xr_join_label)
-
-	xr_blackout_panel = MeshInstance3D.new()
-	xr_blackout_panel.name = "BlackoutPanel"
-	var blackout_mesh := QuadMesh.new()
-	blackout_mesh.size = Vector2(4.0, 2.6)
-	xr_blackout_panel.mesh = blackout_mesh
-	xr_blackout_panel.position = Vector3(0.0, 0.46, -0.35)
-	xr_blackout_panel.visible = false
-	xr_blackout_panel.material_override = _hud_panel_material(Color(0.0, 0.0, 0.0, 0.72))
-	xr_hud_root.add_child(xr_blackout_panel)
-
 	xr_crosshair = MeshInstance3D.new()
 	xr_crosshair.name = "PointerDot"
 	var crosshair_mesh := SphereMesh.new()
@@ -546,39 +464,32 @@ func _update_hud() -> void:
 	]
 	if hud_label != null:
 		hud_label.text = status_text
-	if xr_hud_label != null:
-		var gun_text := "READY"
-		if simulation.shots_remaining <= 0:
-			gun_text = "EMPTY"
-		elif simulation.shot_cooldown_remaining > 0.0:
-			gun_text = "COOLING %.1fs" % simulation.shot_cooldown_remaining
-		xr_hud_label.text = "Time %.0fs   Shots %d   Gun %s   Scans %d   Live props %d" % [
-			float(snapshot["time_remaining"]),
-			int(snapshot["shots_remaining"]),
-			gun_text,
-			int(snapshot.get("scan_pulses_remaining", 0)),
-			_live_hider_count()
-		]
-	if xr_phase_label != null:
-		xr_phase_label.text = _phase_instruction_text()
-	if xr_blackout_panel != null:
-		xr_blackout_panel.visible = simulation.phase == HidefallSimulationScript.PHASE_BLACKOUT
 	if settings_menu != null:
 		settings_menu.refresh_values()
 	_update_hand_menu()
 
 
+# The wrist panel is the seeker's only status readout now that the head-locked
+# HUD is gone: phase, timer, gun state, scans, props, and how phones join.
 func _update_hand_menu() -> void:
 	if xr_hand_menu_root == null or xr_hand_menu_label == null:
 		return
 	xr_hand_menu_root.visible = left_controller != null and left_controller.get_is_active() and not _is_settings_menu_open()
-	xr_hand_menu_label.text = "%s\nTime %.0f  Shots %d\nScans %d  Props %d\nRoom %s" % [
+	var gun_text := "ready"
+	if simulation.shots_remaining <= 0:
+		gun_text = "EMPTY"
+	elif simulation.shot_cooldown_remaining > 0.0:
+		gun_text = "cooling %.1fs" % simulation.shot_cooldown_remaining
+	xr_hand_menu_label.text = "%s\nTime %.0f  Shots %d (%s)\nScans %d  Props %d  Live %d\nPhones join via Wi-Fi\nRoom %s  %s" % [
 		_phase_instruction_text(),
 		float(simulation.get_state_snapshot(local_hider_id)["time_remaining"]),
 		simulation.shots_remaining,
+		gun_text,
 		simulation.scan_pulses_remaining,
 		simulation.objects.size(),
-		simulation.room_id
+		_live_hider_count(),
+		simulation.room_id,
+		host_ip
 	]
 
 
@@ -593,13 +504,6 @@ func _update_join_qr(join_payload: String) -> void:
 	var texture := QrCodeScript.make_texture(join_payload, 5)
 	if qr_texture_rect != null:
 		qr_texture_rect.texture = texture
-	if xr_join_label != null:
-		xr_join_label.text = "JOIN FROM YOUR PHONE\nOpen Hidefall - this room appears\nautomatically on your Wi-Fi.\nManual: %s:%d\nRoom %s   Code %s" % [
-			host_ip,
-			int(config.get_value("network", "port", 29444)),
-			simulation.room_id,
-			simulation.room_token
-		]
 
 
 func _shoot_at_cursor() -> void:
@@ -669,7 +573,7 @@ func _grab_source() -> Node3D:
 
 func _can_grab_phase() -> bool:
 	match simulation.phase:
-		HidefallSimulationScript.PHASE_OBJECT_RAIN, HidefallSimulationScript.PHASE_BLACKOUT, HidefallSimulationScript.PHASE_SEEK:
+		HidefallSimulationScript.PHASE_OBJECT_RAIN, HidefallSimulationScript.PHASE_SEEK:
 			return true
 	return false
 
@@ -996,15 +900,13 @@ func _is_xr_active() -> bool:
 func _phase_instruction_text() -> String:
 	match simulation.phase:
 		HidefallSimulationScript.PHASE_LOBBY:
-			return "READY - press A to start the hunt"
+			return "READY - open wrist menu (Y) to start"
 		HidefallSimulationScript.PHASE_ROOM_SETUP:
 			return "SETUP - press A to confirm your play space"
 		HidefallSimulationScript.PHASE_OBJECT_RAIN:
-			return "PROPS FALLING - grab and toss them while they land"
-		HidefallSimulationScript.PHASE_BLACKOUT:
-			return "BLACKOUT - stand still, hiders are hiding"
+			return "PROPS FALLING - hiders are dropping in too"
 		HidefallSimulationScript.PHASE_SEEK:
-			return "HUNT - shoot the live props before time runs out"
+			return "HUNT - find the live props, misses cost ammo"
 		HidefallSimulationScript.PHASE_RESULTS:
 			return "ROUND OVER - press A to play again"
 	return "HIDEFALL"

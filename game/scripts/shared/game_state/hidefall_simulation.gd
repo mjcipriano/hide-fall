@@ -7,7 +7,6 @@ const ScoreCalculatorScript := preload("res://scripts/shared/scoring/score_calcu
 const PHASE_LOBBY := "lobby"
 const PHASE_ROOM_SETUP := "room_setup"
 const PHASE_OBJECT_RAIN := "object_rain"
-const PHASE_BLACKOUT := "blackout"
 const PHASE_SEEK := "seek"
 const PHASE_RESULTS := "results"
 
@@ -218,13 +217,11 @@ func advance(delta: float) -> void:
 			if phase_elapsed >= float(config.get_value("round", "room_setup_seconds", 5.0)):
 				_set_phase(PHASE_OBJECT_RAIN)
 		PHASE_OBJECT_RAIN:
-			_integrate_object_rain(delta)
-			if phase_elapsed >= float(config.get_value("round", "object_rain_seconds", 10.0)):
-				_set_phase(PHASE_BLACKOUT)
-		PHASE_BLACKOUT:
 			_update_bot_inputs(delta)
-			_integrate_free_decoys(delta)
-			if phase_elapsed >= float(config.get_value("round", "blackout_seconds", 10.0)):
+			_integrate_object_rain(delta)
+			# Everything (hiders included) falls from the sky, then the hunt
+			# starts immediately; there is no blackout stage.
+			if phase_elapsed >= float(config.get_value("round", "object_rain_seconds", 10.0)):
 				_set_phase(PHASE_SEEK)
 		PHASE_SEEK:
 			_update_bot_inputs(delta)
@@ -234,7 +231,7 @@ func advance(delta: float) -> void:
 				stats["all_hiders_found"] = true
 				stats["time_bonus"] = _time_remaining()
 				_finish_round()
-			elif phase_elapsed >= float(config.get_value("round", "seek_seconds", 90.0)):
+			elif bool(config.get_value("round", "end_on_seek_timeout", false)) and phase_elapsed >= float(config.get_value("round", "seek_seconds", 90.0)):
 				_finish_round()
 		PHASE_RESULTS:
 			if phase_elapsed >= float(config.get_value("round", "results_seconds", 15.0)):
@@ -255,7 +252,7 @@ func apply_hider_input(player_id: String, input: Dictionary) -> bool:
 	var obj: Dictionary = objects[object_id]
 	if obj.get("held_by_seeker", false) and bool(config.get_value("hiders", "cannot_move_while_held", true)):
 		return false
-	if phase != PHASE_BLACKOUT and phase != PHASE_SEEK:
+	if phase != PHASE_OBJECT_RAIN and phase != PHASE_SEEK:
 		return false
 
 	var move := Vector2.ZERO
@@ -295,17 +292,20 @@ func begin_shot_cooldown() -> void:
 	shot_cooldown_remaining = float(config.get_value("seeker", "shot_cooldown_seconds", 2.5))
 
 
+# Default ammo economy: hitting a live hider is free; only misses (decoys)
+# consume a shot, and spending the last shot ends the round for the seeker.
 func shoot_object(object_id: String) -> Dictionary:
 	var gate := can_fire()
 	if not gate.get("accepted", false):
 		return gate
 	if not objects.has(object_id):
 		return {"accepted": false, "reason": "unknown_object"}
-	shots_remaining -= 1
 	begin_shot_cooldown()
 	stats["shots_fired"] = int(stats["shots_fired"]) + 1
 	var obj: Dictionary = objects[object_id]
 	if obj.get("is_hider", false) and obj.get("alive", true):
+		if bool(config.get_value("seeker", "consume_shot_on_hit", false)):
+			shots_remaining -= 1
 		obj["alive"] = false
 		objects[object_id] = obj
 		var owner_id: String = obj.get("owner_player_id", "")
@@ -317,9 +317,12 @@ func shoot_object(object_id: String) -> Dictionary:
 			stats["time_bonus"] = _time_remaining()
 			_finish_round()
 		return {"accepted": true, "hit": true, "player_id": owner_id}
+	shots_remaining -= 1
 	stats["wrong_shots"] = int(stats["wrong_shots"]) + 1
 	obj["damaged"] = true
 	objects[object_id] = obj
+	if shots_remaining <= 0 and bool(config.get_value("round", "end_when_out_of_shots", true)):
+		_finish_round()
 	return {"accepted": true, "hit": false}
 
 
@@ -821,10 +824,18 @@ func _integrate_hider_motion(delta: float) -> void:
 					obj["dash_time"] = max(0.0, float(obj.get("dash_time", 0.0)) - delta)
 			else:
 				obj["dash_time"] = 0.0
-				var acceleration := Vector3(move.x, 0.0, move.y) * speed * 4.0
-				velocity.x = (velocity.x + acceleration.x * delta) * 0.88
-				velocity.z = (velocity.z + acceleration.z * delta) * 0.88
-				var planar := Vector2(velocity.x, velocity.z).limit_length(2.4 * speed)
+				# Frame-rate independent steering: the old per-frame *0.88 drag
+				# crushed velocity at headset frame rates (hiders crawled at
+				# ~0.4 m/s on device while headless tests felt fine). Exponential
+				# damping keeps the same top speed at any tick rate and stops
+				# crisply when the stick is released.
+				var acceleration := Vector3(move.x, 0.0, move.y) * speed * 8.0
+				velocity.x += acceleration.x * delta
+				velocity.z += acceleration.z * delta
+				var damping := exp((-4.5 if move.length() > 0.05 else -8.0) * delta)
+				velocity.x *= damping
+				velocity.z *= damping
+				var planar := Vector2(velocity.x, velocity.z).limit_length(2.6 * speed)
 				velocity.x = planar.x
 				velocity.z = planar.y
 			velocity.y -= 9.8 * delta
@@ -986,8 +997,6 @@ func _time_remaining() -> float:
 			duration = float(config.get_value("round", "room_setup_seconds", 5.0))
 		PHASE_OBJECT_RAIN:
 			duration = float(config.get_value("round", "object_rain_seconds", 10.0))
-		PHASE_BLACKOUT:
-			duration = float(config.get_value("round", "blackout_seconds", 10.0))
 		PHASE_SEEK:
 			duration = float(config.get_value("round", "seek_seconds", 90.0))
 		PHASE_RESULTS:

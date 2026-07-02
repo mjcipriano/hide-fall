@@ -4,12 +4,12 @@ extends Node3D
 signal action_requested(action)
 signal setting_changed(section, key, value)
 
-const PANEL_WIDTH := 1.38
-const PANEL_HEIGHT := 1.16
-const ROW_WIDTH := 1.18
-const ROW_HEIGHT := 0.074
-const ROW_START_Y := 0.39
-const ROW_STEP := 0.082
+const PANEL_WIDTH := 0.92
+const PANEL_HEIGHT := 0.80
+const ROW_WIDTH := 0.80
+const ROW_HEIGHT := 0.052
+const ROW_START_Y := 0.265
+const ROW_STEP := 0.057
 
 var config
 var rows: Array[Dictionary] = []
@@ -115,8 +115,8 @@ func _build_rows() -> void:
 		{"type": "action", "label": "End round", "action": "end_round"},
 		{"type": "setting", "label": "Gun cooldown", "section": "seeker", "key": "shot_cooldown_seconds", "values": [0.5, 1.0, 1.5, 2.5, 3.5, 5.0], "suffix": "s"},
 		{"type": "setting", "label": "Prop count", "section": "objects", "key": "decoy_count", "values": [30, 50, 75, 100, 125], "suffix": ""},
+		{"type": "setting", "label": "Timer ends hunt", "section": "round", "key": "end_on_seek_timeout", "values": [false, true], "labels": ["Off", "On"], "suffix": ""},
 		{"type": "setting", "label": "Hunt time", "section": "round", "key": "seek_seconds", "values": [60, 90, 120, 180], "suffix": "s"},
-		{"type": "setting", "label": "Blackout", "section": "round", "key": "blackout_seconds", "values": [5, 10, 15, 20], "suffix": "s"},
 		{"type": "setting", "label": "Shape change", "section": "hiders", "key": "shape_change_cooldown", "values": [4, 8, 12, 18], "suffix": "s"},
 		{"type": "setting", "label": "Color change", "section": "hiders", "key": "color_change_cooldown", "values": [2, 4, 6, 10], "suffix": "s"},
 		{"type": "setting", "label": "Scan pulses", "section": "seeker", "key": "scan_pulse_count", "values": [0, 1, 2, 3], "suffix": ""},
@@ -148,11 +148,11 @@ func _rebuild_visuals() -> void:
 	var title := Label3D.new()
 	title.name = "Title"
 	title.text = "HIDEFALL SETTINGS"
-	title.font_size = 28
-	title.outline_size = 7
-	title.pixel_size = 0.00155
+	title.font_size = 20
+	title.outline_size = 5
+	title.pixel_size = 0.00115
 	title.width = 1180.0
-	title.position = Vector3(-0.58, 0.515, 0.006)
+	title.position = Vector3(-0.385, 0.345, 0.006)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	title.modulate = Color(0.25, 0.92, 1.0, 1.0)
 	add_child(title)
@@ -171,11 +171,11 @@ func _rebuild_visuals() -> void:
 
 		var label := Label3D.new()
 		label.name = "Row%dLabel" % index
-		label.font_size = 19
-		label.outline_size = 5
-		label.pixel_size = 0.00136
+		label.font_size = 15
+		label.outline_size = 4
+		label.pixel_size = 0.00105
 		label.width = 1160.0
-		label.position = Vector3(-0.55, y + 0.018, 0.01)
+		label.position = Vector3(-0.375, y + 0.012, 0.01)
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		label.modulate = Color(0.93, 0.98, 1.0, 1.0)
@@ -184,12 +184,12 @@ func _rebuild_visuals() -> void:
 
 	var help := Label3D.new()
 	help.name = "Help"
-	help.text = "Y/M toggle menu   Right pointer + trigger selects\nTrigger shoots, grip grabs, A starts/scans when this menu is closed"
-	help.font_size = 15
-	help.outline_size = 5
-	help.pixel_size = 0.00128
+	help.text = "Y/M toggle menu   Right pointer + trigger selects\nTrigger shoots, grip grabs, A scans when this menu is closed"
+	help.font_size = 11
+	help.outline_size = 3
+	help.pixel_size = 0.00095
 	help.width = 1180.0
-	help.position = Vector3(-0.58, -0.49, 0.006)
+	help.position = Vector3(-0.385, -0.335, 0.006)
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	help.modulate = Color(0.72, 0.82, 0.95, 1.0)
 	add_child(help)
@@ -203,8 +203,13 @@ func _update_labels() -> void:
 		if row.get("type", "") == "action":
 			row_labels[index].text = "  %s" % String(row.get("label", ""))
 		else:
-			var value = row["values"][int(row.get("value_index", 0))]
-			row_labels[index].text = "  %s: %s%s" % [String(row.get("label", "")), _format_value(value), String(row.get("suffix", ""))]
+			var value_index := int(row.get("value_index", 0))
+			var value_text: String
+			if row.has("labels"):
+				value_text = String(row["labels"][value_index])
+			else:
+				value_text = _format_value(row["values"][value_index])
+			row_labels[index].text = "  %s: %s%s" % [String(row.get("label", "")), value_text, String(row.get("suffix", ""))]
 
 
 func _cycle_setting(index: int) -> void:

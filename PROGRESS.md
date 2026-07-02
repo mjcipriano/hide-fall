@@ -765,6 +765,31 @@ Local verification:
 - Downloaded assets: `sha256sum -c` passed; `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 tools/verify_android_artifacts.sh` passed.
 - Released Quest APK smoke passed on hardware over wireless adb (192.168.0.253:5555): install-over succeeded, log shows the lobby-first marker `Hidefall visible world pending: phase=lobby objects=0 object_nodes=0 xr=OpenXR immersive passthrough network=listening` plus `Hidefall LAN announcer broadcasting on udp/29445`, zero tonemapper/SCRIPT ERROR lines.
 
+## 2026-07-02 Session Plan: v0.3.3 (smaller menu, no blackout, snappier hiders, miss-only ammo, no head HUD)
+
+User feedback after v0.3.2, in their words: the settings menu is too large; get rid of the blackout stage ("it was not implemented correctly anyway - just they press start on the game and everything falls from the sky"); mobile shapes need to be more snappy/move quicker; by default the round should not end until all shots are fired by the seeker, and shots are only consumed on a miss against a hider; get rid of the large screen in front of the seeker.
+
+### Approach
+
+1. **Remove blackout** (`hidefall_simulation.gd` + everywhere): delete `PHASE_BLACKOUT`; `object_rain` transitions straight to `seek`; bots think during rain; hider input is accepted during rain and seek (hiders already drop from the ceiling with decoys since v0.3.2). Remove `round.blackout_seconds` from settings/validator/menu row/phase texts/HUD blackout panel/tests/docs.
+2. **Snappier hider movement**: the old integrator multiplied velocity by `0.88` **per frame**, so at headset frame rates hiders crawled (~0.4 m/s at 72 Hz) while headless tests (dt=0.1) felt fine. Replace with frame-rate-independent physics: `velocity += input * speed * 8.0 * dt`, exponential damping `exp(-4.5*dt)` while steering (`exp(-8*dt)` when idle so they stop crisply), planar cap `2.6 * movement_speed`. Phone-side snapshot interpolation speeds up (blend 14/s, own prop 22/s).
+3. **Ammo economy** (defaults, all configurable): `seeker.consume_shot_on_hit=false` — hitting a live hider does not consume a shot; only misses (decoys) do. `round.end_when_out_of_shots=true` — the round ends when the last shot is spent. `round.end_on_seek_timeout=false` — the hunt timer no longer ends the round by default (it still drives scoring bonuses); a "Hunt timer" On/Off row joins the wrist menu.
+4. **No head-locked HUD**: delete the large status panel parented to the XR camera (status/phase/help/join labels + blackout quad). The compact left-wrist panel absorbs everything: phase instruction, time, shots + gun state, scans, props, room code, and the phone-join line. The pointer dot stays.
+5. **Smaller settings menu**: shrink `xr_settings_menu.gd` ~1/3 (panel 1.38x1.16 -> ~0.92x0.80, rows/fonts scaled), drop the Blackout row, add the Hunt timer Off/On row (rows may declare display `labels` for non-numeric values).
+6. Tests updated (phase flow, ammo economy, timeout default-off + toggled-on, soak sets timer end on, menu geometry/rows) plus new shot-economy coverage. Docs: GAME_DESIGN amendment note, CONTENT_SCHEMA, README, TESTING. Version 0.3.3 / code 12; build, Quest smoke, release.
+
+### Status
+
+Implemented for v0.3.3 / code 12:
+
+- Blackout phase deleted end to end: `PHASE_BLACKOUT` constant, advance() branch, `round.blackout_seconds` (settings/validator/GameConfig fallback), the wrist-menu Blackout row, the XR blackout quad, phase texts, and all blackout tests. `object_rain` now runs bot decisions and goes straight to `seek`; hider input is accepted during rain.
+- Ammo economy: `shoot_object()` only decrements on a miss (`seeker.consume_shot_on_hit=false` default); spending the last shot finishes the round (`round.end_when_out_of_shots=true`); the seek-timeout end is gated behind `round.end_on_seek_timeout=false` and exposed as a "Timer ends hunt" Off/On wrist-menu row (menu rows can now declare display `labels`).
+- Hider movement made frame-rate independent and snappier (`accel = input*speed*8`, `exp(-4.5*dt)` damping while steering / `exp(-8*dt)` idle, cap `2.6*speed`); phone-side prop interpolation raised to 14/s (22/s for the player's own prop) and camera follow to 9/s.
+- Head-locked XR HUD removed entirely; the left-wrist panel now carries phase, time, shots + gun state, scans, props, live count, room code, and host IP. Only the aim dot floats in the room.
+- Settings menu shrunk ~1/3 (panel 1.38x1.16 -> 0.92x0.80, rows 0.052 high, smaller fonts).
+- Docs: GAME_DESIGN.md gained an "Implementation amendments" preamble recording these deviations as authoritative; CONTENT_SCHEMA/README/TESTING updated.
+- Local verification: `make test` passes (228 assertions incl. new shot-economy and timer-toggle tests); upload-signed `make build-apks` + `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 make verify-apks` pass; Quest hardware smoke passes over wireless adb with the lobby-first marker and the announcer line, zero tonemapper/SCRIPT ERROR lines. (One smoke run flagged a transient `xrResume XR_ERROR_HANDLE_INVALID` from a *system* pid emitted while the previous app instance was torn down during install-over; the rerun was clean — a known false-positive pattern to keep in mind for the smoke grep.)
+
 ## Next
 
 1. Install `hidefall-mobile-0.3.2.apk` on the Android phone and verify fullscreen, joystick movement, Dash, and Mimic in a real joined round.

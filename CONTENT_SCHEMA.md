@@ -18,14 +18,16 @@ Currently used gameplay settings include:
 
 - `round.object_rain_seconds`
 - `round.room_setup_seconds`
-- `round.blackout_seconds`
 - `round.seek_seconds`
 - `round.results_seconds`
+- `round.end_on_seek_timeout` — default `false`: the hunt timer does not end the round.
+- `round.end_when_out_of_shots` — default `true`: spending the last shot ends the round.
 - `round.max_hiders`
 - `objects.decoy_count`
 - `seeker.base_bullets`
 - `seeker.bullets_per_hider`
 - `seeker.shot_cooldown_seconds` — wait between shots; the hiders' escape window.
+- `seeker.consume_shot_on_hit` — default `false`: only misses (decoys) consume a shot.
 - `seeker.scan_pulse_enabled`
 - `seeker.scan_pulse_count`
 - `hiders.movement_speed`

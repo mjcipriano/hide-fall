@@ -21,6 +21,7 @@ Current coverage:
 - Mobile join (with pre-join shape/color/pattern preferences), ready, input, snapshot, 3D world mirroring, and camera-relative movement.
 - Host join, snapshot, pickup/drop, scan, and spectator smoke behavior.
 - Correct and wrong shot behavior, plus the configurable gun cooldown between shots.
+- Ammo economy: hits are free, misses consume shots, the round ends when ammo runs out, and the hunt timer only ends the round when its setting is turned on.
 - Prop physics feel: collision separation, gravity, stacking, rim slide-off, airborne tumbling, per-shape rest modes (side/upright/flat/any), and yaw preservation when settling.
 - Prop factory meshes and procedural pattern materials for every content id.
 - LAN discovery beacon build/parse and a live UDP loopback round trip.

@@ -601,19 +601,22 @@ func _sync_world_props() -> void:
 
 
 # Smoothly slides props toward their latest snapshot pose and drives the camera.
+# The player's own prop blends fastest so their joystick feels snappy.
 func _animate_world(delta: float) -> void:
 	if world_camera == null:
 		return
-	var blend := clampf(delta * 10.0, 0.0, 1.0)
+	var blend := clampf(delta * 14.0, 0.0, 1.0)
+	var own_blend := clampf(delta * 22.0, 0.0, 1.0)
+	var own_id := String(hider_state.get("object_id", ""))
 	for object_id in world_prop_targets:
 		if not world_props.has(object_id):
 			continue
 		var node: Node3D = world_props[object_id]
 		var target: Dictionary = world_prop_targets[object_id]
-		node.position = node.position.lerp(target["position"], blend)
-		node.quaternion = node.quaternion.slerp(target["orientation"], blend)
+		var prop_blend := own_blend if object_id == own_id else blend
+		node.position = node.position.lerp(target["position"], prop_blend)
+		node.quaternion = node.quaternion.slerp(target["orientation"], prop_blend)
 	var focus := Vector3.ZERO
-	var own_id := String(hider_state.get("object_id", ""))
 	if world_props.has(own_id):
 		focus = world_props[own_id].position
 		if own_marker != null:
@@ -626,7 +629,7 @@ func _animate_world(delta: float) -> void:
 	var cam_distance := 2.6 if joined and not own_id.is_empty() else 5.2
 	var cam_height := 1.5 if joined and not own_id.is_empty() else 3.2
 	var cam_target := focus + Vector3(sin(cam_yaw) * cam_distance, cam_height, cos(cam_yaw) * cam_distance)
-	world_camera.position = world_camera.position.lerp(cam_target, clampf(delta * 6.0, 0.0, 1.0))
+	world_camera.position = world_camera.position.lerp(cam_target, clampf(delta * 9.0, 0.0, 1.0))
 	world_camera.look_at(focus + Vector3(0.0, 0.2, 0.0))
 
 
@@ -1065,7 +1068,7 @@ func _update_status() -> void:
 	if ready_button != null:
 		ready_button.visible = current_phase == "lobby" and not spectator
 	if dash_button != null:
-		var in_round := current_phase == "blackout" or current_phase == "seek"
+		var in_round := current_phase == "object_rain" or current_phase == "seek"
 		dash_button.disabled = not in_round or spectator or float(cooldowns.get("dash", 0.0)) > 0.05
 		mimic_button.disabled = not in_round or spectator or float(cooldowns.get("mimic", 0.0)) > 0.05
 		dash_button.text = "DASH" if float(cooldowns.get("dash", 0.0)) <= 0.05 else "DASH %.0f" % float(cooldowns.get("dash", 0.0))
@@ -1100,11 +1103,12 @@ func _phase_text() -> String:
 		"room_setup":
 			return "SEEKER IS SETTING UP"
 		"object_rain":
-			return "PROPS FALLING %.0fs" % time_remaining
-		"blackout":
-			return "HIDE NOW! %.0fs" % time_remaining
+			return "DROPPING IN - GET READY %.0fs" % time_remaining
 		"seek":
-			return "SEEKER HUNTING %.0fs" % time_remaining
+			# With the default no-timer mode the countdown parks at 0; hide it.
+			if time_remaining > 0.5:
+				return "SEEKER HUNTING %.0fs" % time_remaining
+			return "SEEKER HUNTING"
 		"results":
 			return "ROUND OVER"
 	return current_phase.to_upper()
