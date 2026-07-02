@@ -872,9 +872,27 @@ User reported that starting from the left-hand menu did not start the game, and 
 - `HIDEFALL_ENFORCE_UPLOAD_SIGNING=1 tools/verify_android_artifacts.sh /tmp/hidefall-release-v0.3.5/hidefall-quest-0.3.5.apk /tmp/hidefall-release-v0.3.5/hidefall-mobile-0.3.5.apk` passed.
 - Released Quest APK smoke passed over wireless adb `192.168.0.253:5555` after uninstalling the locally debug-signed package once; install, launch, process check, and log checks passed. Smoke log: `build/quest-smoke/quest-smoke-logcat.txt`.
 
+## 2026-07-02 Follow-up: Quest wrist menu fit polish
+
+User reported that the left settings menu was still too large and too wide, the floating "Press A to start" prompt was still visible after start, and one shot endless hider looked frozen instead of disappearing.
+
+- Bumped Android version metadata to `0.3.6` / code `15` for the release.
+- `xr_settings_menu.gd`: rebuilt the settings panel as a compact paged wrist deck. The physical panel is now `0.24m x 0.26m` instead of `0.52m x 0.46m`; at the Quest 3 wrist-view reference distance of `0.50m`, the test-reported angular size is `27.0 x 29.1` degrees. Rows are split into ROUND and ROOM pages with shorter labels, narrower sliders/toggles, and no footer copy.
+- `host_prototype.gd`: the arena start hint is now tracked as `arena_hint` and is visible only in lobby, so it hides immediately after A/R starts or rematches a round.
+- `host_prototype.gd`: `_update_objects()` now removes stale visual nodes for object ids that were erased from the authoritative simulation. This fixes endless-hiders shot bodies lingering visually after the hider respawns into a new prop.
+- Tests updated: settings-menu smoke now prints and asserts Quest 3 reference physical/angular size, proves the old 52cm menu is too wide, checks page navigation, and keeps direct A/R start outside the settings menu. Host smoke asserts the floating start prompt hides after start, one-shot hider bodies become invisible after a hit, and endless shot hider bodies are removed from the visible scene.
+- Local verification before APK build: `make test` passes. Expected existing test-log noise still appears for malformed JSON and sandbox-blocked UDP loopback, but the runner exits `Godot tests passed`.
+- Release-candidate verification after the `0.3.6` / code `15` bump at 2026-07-02 14:43 ET:
+  - `make test` passed.
+  - `make build-apks` passed outside the sandbox; reran after final source cleanup so the APKs match the commit.
+  - `make verify-apks` passed for `build/hidefall-quest.apk` and `build/hidefall-mobile.apk`.
+  - `aapt dump badging` confirmed both local APKs have `versionName=0.3.6` and `versionCode=15`.
+  - `make smoke-quest-apk` passed on Quest over wireless adb after uninstalling the differently signed previous package once. Final smoke log: `build/quest-smoke/quest-smoke-logcat.txt`; marker: `Hidefall visible world pending: phase=lobby objects=0 object_nodes=0 xr=OpenXR immersive passthrough network=listening`; LAN announcer started on udp/29445; zero tonemapper/SCRIPT ERROR/fatal crash markers; same known generic-controller OpenXR warning only.
+
 ## Next
 
-1. Install `hidefall-mobile-0.3.4.apk` on the Android phone and verify in a real round: fullscreen, snappy joystick, Dash, Mimic, Quake (props fly + rumble on the headset), Ping (seeker hears your jingle from your prop), and the endless-hiders respawn flash.
-2. In headset, feel-check: direct A start/restart, the new smaller slider/toggle wrist settings menu, status panel text fit, the two game modes (switch Mode in the wrist menu, restart round), earthquake chaos, and whether per-player ping jingles are distinguishable. Tune `hiders.ping_cooldown_seconds` / `earthquake_power` if abilities feel too strong or weak.
-3. Non-blocking cleanup: update GitHub Actions setup-miniconda options to remove `auto-activate-base` and implicit `defaults` channel annotations.
-4. iOS build path remains untested.
+1. Complete `v0.3.6` release: commit, tag, push, GitHub Actions release, released-asset checksum/artifact verification, and released Quest smoke.
+2. Install the latest mobile APK on the Android phone and verify in a real round: fullscreen, snappy joystick, Dash, Mimic, Quake, Ping, and the endless-hiders respawn flash.
+3. In headset, feel-check the final 24cm x 26cm paged settings menu and status panel text fit during a real round.
+4. Non-blocking cleanup: update GitHub Actions setup-miniconda options to remove `auto-activate-base` and implicit `defaults` channel annotations.
+5. iOS build path remains untested.

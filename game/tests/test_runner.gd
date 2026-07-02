@@ -675,22 +675,37 @@ func _test_xr_settings_menu() -> void:
 	menu.setup(config)
 	root.add_child(menu)
 	menu.set_open(true)
-	_assert(menu.get_row_count() >= 13, "XR settings menu builds compact grouped control rows")
-	_assert(menu.get_row_label(0).contains("ROUND CONTROL"), "XR settings menu groups round controls")
-	_assert(menu.get_row_label(2).contains("Mode"), "XR settings menu shows the game mode row")
-	_assert(menu.get_row_value_label(2).contains("One-shot"), "XR settings menu shows the mode value defaulting to one-shot")
-	_assert(menu.get_row_label(5).contains("Gun cooldown"), "XR settings menu shows gun cooldown slider row")
-	_assert(menu.get_row_label(3).contains("Timer ends hunt"), "XR settings menu shows the hunt timer toggle")
-	_assert(menu.get_row_value_label(3).contains("Off"), "XR settings menu shows the hunt timer toggle defaulting off")
+	var panel_size: Vector2 = menu.get_panel_size()
+	var angular_size: Vector2 = menu.get_quest3_reference_angular_size()
+	var quest3_reference_distance_m := 0.50
+	var quest3_angular_limit := Vector2(28.0, 30.0)
+	print("Quest3 wrist menu reference size: %.2fm x %.2fm, %.1f x %.1f deg at %.2fm" % [
+		panel_size.x,
+		panel_size.y,
+		angular_size.x,
+		angular_size.y,
+		quest3_reference_distance_m
+	])
+	var old_width_degrees := rad_to_deg(2.0 * atan((0.52 * 0.5) / quest3_reference_distance_m))
+	_assert(old_width_degrees > quest3_angular_limit.x, "previous 52cm wrist menu is too wide at Quest viewing distance")
+	_assert(panel_size.x <= 0.241 and angular_size.x <= quest3_angular_limit.x, "XR settings menu width fits a Quest wrist-view reference")
+	_assert(panel_size.y <= 0.261 and angular_size.y <= quest3_angular_limit.y, "XR settings menu height fits a Quest wrist-view reference")
+	_assert(menu.get_row_count() <= 7, "XR settings menu uses paged rows instead of one oversized sheet")
+	_assert(menu.get_current_page_title() == "ROUND", "XR settings menu opens on round page")
+	_assert(menu.get_row_label(1).contains("Mode"), "XR settings menu shows the game mode row")
+	_assert(menu.get_row_value_label(1).contains("One-shot"), "XR settings menu shows the mode value defaulting to one-shot")
+	_assert(menu.get_row_label(4).contains("Gun"), "XR settings menu shows compact gun cooldown slider row")
+	_assert(menu.get_row_label(2).contains("Timer"), "XR settings menu shows the hunt timer toggle")
+	_assert(menu.get_row_value_label(2).contains("Off"), "XR settings menu shows the hunt timer toggle defaulting off")
 	var has_blackout_row := false
 	for index in menu.get_row_count():
 		if menu.get_row_label(index).contains("Blackout"):
 			has_blackout_row = true
 	_assert(not has_blackout_row, "XR settings menu no longer offers a blackout setting")
-	menu.force_hover(2)
+	menu.force_hover(1)
 	menu.activate_hovered()
 	_assert(String(config.get_value("round", "mode", "")) == "endless_hiders", "mode row cycles to endless hiders")
-	_assert(menu.get_row_value_label(2).contains("Endless"), "mode row value shows the new mode")
+	_assert(menu.get_row_value_label(1).contains("Endless"), "mode row value shows the new mode")
 	menu.activate_hovered()
 	_assert(String(config.get_value("round", "mode", "")) == "one_shot", "mode row cycles back to one-shot")
 	var changed := {"section": "", "key": "", "value": null}
@@ -699,16 +714,23 @@ func _test_xr_settings_menu() -> void:
 		changed["key"] = key
 		changed["value"] = value
 	)
-	var hovered := menu.update_pointer(Vector3(0.0, -0.045, 1.0), Vector3(0.0, 0.0, -1.0))
+	var hovered := menu.update_pointer(Vector3(0.0, -0.060, 1.0), Vector3(0.0, 0.0, -1.0))
 	_assert(hovered, "XR settings menu pointer intersects the panel")
 	_assert(menu.activate_hovered(), "XR settings menu activates hovered setting row")
 	_assert(changed.get("section", "") == "seeker" and changed.get("key", "") == "shot_cooldown_seconds", "XR settings menu emits setting change")
 	_assert(absf(float(config.get_value("seeker", "shot_cooldown_seconds", 0.0)) - 3.5) < 0.001, "XR settings menu cycles config value")
+	menu.force_hover(6)
+	_assert(menu.activate_hovered(), "XR settings menu activates page navigation")
+	_assert(menu.get_current_page_title() == "ROOM", "XR settings menu navigates to room page")
+	_assert(menu.get_row_label(0).contains("Props"), "XR settings menu room page shows prop count")
+	_assert(menu.get_row_label(1).contains("Bots"), "XR settings menu room page shows bot hiders")
 	var action := {"value": ""}
 	menu.action_requested.connect(func(value) -> void:
 		action["value"] = String(value)
 	)
-	menu.force_hover(1)
+	menu.force_hover(4)
+	_assert(menu.activate_hovered(), "XR settings menu returns to round page")
+	menu.force_hover(0)
 	_assert(menu.activate_hovered(), "XR settings menu activates action row")
 	_assert(action["value"] == "end_round", "XR settings menu emits end-round action")
 	root.remove_child(menu)
@@ -772,7 +794,7 @@ func _test_host_scene_smoke() -> void:
 	_assert(scene.simulation != null, "host scene creates simulation")
 	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_LOBBY, "host scene starts in lobby")
 	_assert(scene.settings_menu != null, "host scene creates settings menu")
-	scene.settings_menu.force_hover(5)
+	scene.settings_menu.force_hover(4)
 	scene.settings_menu.activate_hovered()
 	_assert(absf(float(scene.config.get_value("seeker", "shot_cooldown_seconds", 0.0)) - 3.5) < 0.001, "host settings menu updates config")
 	var bot_count_before: int = scene.simulation.players.size()
@@ -786,9 +808,28 @@ func _test_host_scene_smoke() -> void:
 	scene._activate_primary_action()
 	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_OBJECT_RAIN, "host scene primary action starts a visible solo round from lobby")
 	_assert(scene.object_nodes.size() >= 75, "visible solo round creates prop nodes immediately")
+	_assert(scene.arena_hint != null and not scene.arena_hint.visible, "host hides the floating start prompt once a round starts")
+	_advance_for(scene.simulation, 20.4)
+	var shot_hider_id: String = scene.simulation.get_hider_object_ids()[0]
+	var one_shot_result: Dictionary = scene.simulation.shoot_object(shot_hider_id)
+	scene._update_objects()
+	_assert(one_shot_result.get("hit", false), "host test shot hits a hider in one-shot mode")
+	_assert(scene.object_nodes.has(shot_hider_id) and not scene.object_nodes[shot_hider_id].visible, "one-shot hider body disappears after being shot")
 	scene.simulation.end_round()
 	scene._activate_primary_action()
 	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_OBJECT_RAIN, "host scene primary action restarts from results")
+	scene.config.set_value("round", "mode", "endless_hiders")
+	scene.simulation.end_round()
+	scene._activate_primary_action()
+	_advance_for(scene.simulation, 20.4)
+	var endless_hider_id: String = scene.simulation.get_hider_object_ids()[0]
+	var endless_result: Dictionary = scene.simulation.shoot_object(endless_hider_id)
+	scene._update_objects()
+	_assert(endless_result.get("hit", false), "host test shot hits a hider in endless mode")
+	_assert(not scene.object_nodes.has(endless_hider_id), "endless shot hider body is removed from the visible scene")
+	scene.config.set_value("round", "mode", "one_shot")
+	scene.simulation.end_round()
+	scene._activate_primary_action()
 	var takeover_host := FakeNetworkHost.new()
 	scene.network_host = takeover_host
 	scene._handle_join_request(99, {

@@ -4,15 +4,19 @@ extends Node3D
 signal action_requested(action)
 signal setting_changed(section, key, value)
 
-const PANEL_WIDTH := 0.52
-const PANEL_HEIGHT := 0.46
-const ROW_WIDTH := 0.45
-const ROW_HEIGHT := 0.030
-const ROW_START_Y := 0.125
-const ROW_STEP := 0.034
+const PANEL_WIDTH := 0.24
+const PANEL_HEIGHT := 0.26
+const ROW_WIDTH := 0.205
+const ROW_HEIGHT := 0.026
+const ROW_START_Y := 0.062
+const ROW_STEP := 0.030
+const QUEST3_REFERENCE_VIEW_DISTANCE_M := 0.50
+const QUEST3_MAX_REFERENCE_WIDTH_DEGREES := 28.0
+const QUEST3_MAX_REFERENCE_HEIGHT_DEGREES := 30.0
 
 var config
 var rows: Array[Dictionary] = []
+var page_index := 0
 var row_labels: Array[Label3D] = []
 var row_panels: Array[MeshInstance3D] = []
 var row_value_labels: Array[Label3D] = []
@@ -28,7 +32,6 @@ var fill_material: StandardMaterial3D
 var knob_material: StandardMaterial3D
 var toggle_off_material: StandardMaterial3D
 var toggle_on_material: StandardMaterial3D
-var header_material: StandardMaterial3D
 
 
 func setup(p_config) -> void:
@@ -55,6 +58,25 @@ func is_open() -> bool:
 
 func get_row_count() -> int:
 	return rows.size()
+
+
+func get_current_page_title() -> String:
+	return _page_title(page_index)
+
+
+func get_panel_size() -> Vector2:
+	return Vector2(PANEL_WIDTH, PANEL_HEIGHT)
+
+
+func get_quest3_reference_angular_size() -> Vector2:
+	return Vector2(
+		_angular_degrees(PANEL_WIDTH, QUEST3_REFERENCE_VIEW_DISTANCE_M),
+		_angular_degrees(PANEL_HEIGHT, QUEST3_REFERENCE_VIEW_DISTANCE_M)
+	)
+
+
+func get_quest3_reference_max_angular_size() -> Vector2:
+	return Vector2(QUEST3_MAX_REFERENCE_WIDTH_DEGREES, QUEST3_MAX_REFERENCE_HEIGHT_DEGREES)
 
 
 func get_row_label(index: int) -> String:
@@ -104,9 +126,14 @@ func activate_hovered() -> bool:
 	if hovered_index < 0 or hovered_index >= rows.size():
 		return false
 	var row: Dictionary = rows[hovered_index]
-	if row.get("type", "") == "header":
-		return false
 	if row.get("type", "") == "action":
+		var action := String(row.get("action", ""))
+		if action == "next_page":
+			_set_page(posmod(page_index + 1, _page_count()))
+			return true
+		if action == "previous_page":
+			_set_page(posmod(page_index - 1, _page_count()))
+			return true
 		action_requested.emit(String(row.get("action", "")))
 		return true
 	_cycle_setting(hovered_index)
@@ -127,21 +154,7 @@ func refresh_values() -> void:
 
 
 func _build_rows() -> void:
-	rows = [
-		{"type": "header", "label": "ROUND CONTROL"},
-		{"type": "action", "label": "End active round", "action": "end_round"},
-		{"type": "setting", "label": "Mode", "section": "round", "key": "mode", "values": ["one_shot", "endless_hiders"], "labels": ["One-shot", "Endless"], "style": "segment", "suffix": ""},
-		{"type": "setting", "label": "Timer ends hunt", "section": "round", "key": "end_on_seek_timeout", "values": [false, true], "labels": ["Off", "On"], "style": "toggle", "suffix": ""},
-		{"type": "header", "label": "SEEKER"},
-		{"type": "setting", "label": "Gun cooldown", "section": "seeker", "key": "shot_cooldown_seconds", "values": [0.5, 1.0, 1.5, 2.5, 3.5, 5.0], "style": "slider", "suffix": "s"},
-		{"type": "setting", "label": "Hunt time", "section": "round", "key": "seek_seconds", "values": [60, 90, 120, 180], "style": "slider", "suffix": "s"},
-		{"type": "setting", "label": "Scan pulses", "section": "seeker", "key": "scan_pulse_count", "values": [0, 1, 2, 3], "style": "slider", "suffix": ""},
-		{"type": "header", "label": "ROOM + HIDERS"},
-		{"type": "setting", "label": "Prop count", "section": "objects", "key": "decoy_count", "values": [30, 50, 75, 100, 125], "style": "slider", "suffix": ""},
-		{"type": "setting", "label": "Shape shift", "section": "hiders", "key": "shape_change_cooldown", "values": [4, 8, 12, 18], "style": "slider", "suffix": "s"},
-		{"type": "setting", "label": "Color shift", "section": "hiders", "key": "color_change_cooldown", "values": [2, 4, 6, 10], "style": "slider", "suffix": "s"},
-		{"type": "setting", "label": "Bot hiders", "section": "hiders", "key": "bot_count", "values": [0, 1, 2, 3, 4, 6], "style": "slider", "suffix": ""}
-	]
+	rows = _rows_for_page(page_index)
 	if config != null:
 		for index in rows.size():
 			var row: Dictionary = rows[index]
@@ -170,25 +183,25 @@ func _rebuild_visuals() -> void:
 
 	var title := Label3D.new()
 	title.name = "Title"
-	title.text = "HIDEFALL SETTINGS"
-	title.font_size = 13
-	title.outline_size = 4
-	title.pixel_size = 0.00078
-	title.width = 1180.0
-	title.position = Vector3(-0.215, 0.190, 0.006)
+	title.text = "%s CONTROL" % _page_title(page_index)
+	title.font_size = 8
+	title.outline_size = 2
+	title.pixel_size = 0.00055
+	title.width = 370.0
+	title.position = Vector3(-0.102, 0.108, 0.006)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	title.modulate = Color(0.25, 0.92, 1.0, 1.0)
 	add_child(title)
 
 	var shortcut := Label3D.new()
 	shortcut.name = "ShortcutHint"
-	shortcut.text = "A / R starts, confirms, and rematches"
-	shortcut.font_size = 8
+	shortcut.text = "A START"
+	shortcut.font_size = 6
 	shortcut.outline_size = 2
-	shortcut.pixel_size = 0.00066
-	shortcut.width = 900.0
-	shortcut.position = Vector3(-0.215, 0.166, 0.006)
-	shortcut.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	shortcut.pixel_size = 0.00050
+	shortcut.width = 185.0
+	shortcut.position = Vector3(0.010, 0.107, 0.006)
+	shortcut.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	shortcut.modulate = Color(0.78, 0.90, 1.0, 1.0)
 	add_child(shortcut)
 
@@ -198,12 +211,10 @@ func _rebuild_visuals() -> void:
 		var row_panel := MeshInstance3D.new()
 		row_panel.name = "Row%dPanel" % index
 		var row_mesh := QuadMesh.new()
-		row_mesh.size = Vector2(ROW_WIDTH, ROW_HEIGHT * 0.52 if row_type == "header" else ROW_HEIGHT)
+		row_mesh.size = Vector2(ROW_WIDTH, ROW_HEIGHT)
 		row_panel.mesh = row_mesh
 		row_panel.position = Vector3(0.0, y, 0.004)
-		if row_type == "header":
-			row_panel.material_override = header_material
-		elif row_type == "action":
+		if row_type == "action":
 			row_panel.material_override = action_material
 		else:
 			row_panel.material_override = normal_material
@@ -212,24 +223,24 @@ func _rebuild_visuals() -> void:
 
 		var label := Label3D.new()
 		label.name = "Row%dLabel" % index
-		label.font_size = 8 if row_type == "header" else 10
+		label.font_size = 7
 		label.outline_size = 2
-		label.pixel_size = 0.00066 if row_type == "header" else 0.00070
-		label.width = 900.0
-		label.position = Vector3(-0.210, y + (0.005 if row_type == "header" else 0.007), 0.01)
+		label.pixel_size = 0.00050
+		label.width = 300.0
+		label.position = Vector3(-0.097, y + 0.005, 0.01)
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		label.modulate = Color(0.35, 0.95, 1.0, 1.0) if row_type == "header" else Color(0.93, 0.98, 1.0, 1.0)
+		label.modulate = Color(0.93, 0.98, 1.0, 1.0)
 		add_child(label)
 		row_labels.append(label)
 
 		var value_label := Label3D.new()
 		value_label.name = "Row%dValue" % index
-		value_label.font_size = 9
+		value_label.font_size = 6
 		value_label.outline_size = 2
-		value_label.pixel_size = 0.00066
-		value_label.width = 520.0
-		value_label.position = Vector3(0.076, y + 0.007, 0.011)
+		value_label.pixel_size = 0.00050
+		value_label.width = 190.0
+		value_label.position = Vector3(-0.006, y + 0.005, 0.011)
 		value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		value_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		value_label.modulate = Color(0.95, 1.0, 1.0, 1.0)
@@ -240,9 +251,9 @@ func _rebuild_visuals() -> void:
 		var track := MeshInstance3D.new()
 		track.name = "Row%dTrack" % index
 		var track_mesh := QuadMesh.new()
-		track_mesh.size = Vector2(0.145, 0.006)
+		track_mesh.size = Vector2(0.068, 0.005)
 		track.mesh = track_mesh
-		track.position = Vector3(0.132, y - 0.008, 0.012)
+		track.position = Vector3(0.063, y - 0.007, 0.012)
 		track.material_override = track_material
 		track.visible = row_type == "setting"
 		add_child(track)
@@ -251,25 +262,13 @@ func _rebuild_visuals() -> void:
 		var knob := MeshInstance3D.new()
 		knob.name = "Row%dKnob" % index
 		var knob_mesh := QuadMesh.new()
-		knob_mesh.size = Vector2(0.017, 0.017)
+		knob_mesh.size = Vector2(0.011, 0.011)
 		knob.mesh = knob_mesh
-		knob.position = Vector3(0.060, y - 0.008, 0.014)
+		knob.position = Vector3(0.029, y - 0.007, 0.014)
 		knob.material_override = knob_material
 		knob.visible = row_type == "setting"
 		add_child(knob)
 		row_knobs.append(knob)
-
-	var help := Label3D.new()
-	help.name = "Help"
-	help.text = "Y/M menu   Right pointer + trigger edits settings\nClosed: trigger shoots, grip grabs, A scans or starts"
-	help.font_size = 7
-	help.outline_size = 2
-	help.pixel_size = 0.00062
-	help.width = 900.0
-	help.position = Vector3(-0.215, -0.205, 0.006)
-	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	help.modulate = Color(0.72, 0.82, 0.95, 1.0)
-	add_child(help)
 
 	_update_labels()
 
@@ -278,12 +277,7 @@ func _update_labels() -> void:
 	for index in row_labels.size():
 		var row: Dictionary = rows[index]
 		var row_type := String(row.get("type", ""))
-		if row_type == "header":
-			row_labels[index].text = "  %s" % String(row.get("label", ""))
-			row_value_labels[index].visible = false
-			row_tracks[index].visible = false
-			row_knobs[index].visible = false
-		elif row_type == "action":
+		if row_type == "action":
 			row_labels[index].text = "  %s" % String(row.get("label", ""))
 			row_value_labels[index].visible = false
 			row_tracks[index].visible = false
@@ -326,9 +320,7 @@ func _set_hovered(index: int) -> void:
 			row_panels[row_index].material_override = hover_material
 		else:
 			var row_type := String(rows[row_index].get("type", ""))
-			if row_type == "header":
-				row_panels[row_index].material_override = header_material
-			elif row_type == "action":
+			if row_type == "action":
 				row_panels[row_index].material_override = action_material
 			else:
 				row_panels[row_index].material_override = normal_material
@@ -340,12 +332,12 @@ func _update_setting_control(index: int, row: Dictionary, value_index: int) -> v
 	var t := float(value_index) / float(denom)
 	var style := String(row.get("style", "slider"))
 	var y := ROW_START_Y - float(index) * ROW_STEP
-	row_knobs[index].position.x = lerpf(0.060, 0.204, t)
-	row_tracks[index].position = Vector3(0.132, y - 0.008, 0.012)
+	row_knobs[index].position.x = lerpf(0.029, 0.097, t)
+	row_tracks[index].position = Vector3(0.063, y - 0.007, 0.012)
 	if style == "toggle":
 		row_tracks[index].scale = Vector3(0.58, 1.35, 1.0)
 		row_tracks[index].material_override = toggle_on_material if bool(values[value_index]) else toggle_off_material
-		row_knobs[index].position.x = 0.190 if bool(values[value_index]) else 0.074
+		row_knobs[index].position.x = 0.090 if bool(values[value_index]) else 0.036
 	elif style == "segment":
 		row_tracks[index].scale = Vector3(1.0, 1.65, 1.0)
 		row_tracks[index].material_override = fill_material
@@ -375,11 +367,48 @@ func _format_value(value: Variant) -> String:
 	return "%.1f" % number
 
 
+func _set_page(next_page: int) -> void:
+	page_index = clampi(next_page, 0, _page_count() - 1)
+	_build_rows()
+	_rebuild_visuals()
+
+
+func _page_count() -> int:
+	return 2
+
+
+func _page_title(index: int) -> String:
+	return "ROOM" if index == 1 else "ROUND"
+
+
+func _rows_for_page(index: int) -> Array[Dictionary]:
+	if index == 1:
+		return [
+			{"type": "setting", "label": "Props", "section": "objects", "key": "decoy_count", "values": [30, 50, 75, 100, 125], "style": "slider", "suffix": ""},
+			{"type": "setting", "label": "Bots", "section": "hiders", "key": "bot_count", "values": [0, 1, 2, 3, 4, 6], "style": "slider", "suffix": ""},
+			{"type": "setting", "label": "Shape", "section": "hiders", "key": "shape_change_cooldown", "values": [4, 8, 12, 18], "style": "slider", "suffix": "s"},
+			{"type": "setting", "label": "Color", "section": "hiders", "key": "color_change_cooldown", "values": [2, 4, 6, 10], "style": "slider", "suffix": "s"},
+			{"type": "action", "label": "< Round", "action": "previous_page"}
+		]
+	return [
+		{"type": "action", "label": "End round", "action": "end_round"},
+		{"type": "setting", "label": "Mode", "section": "round", "key": "mode", "values": ["one_shot", "endless_hiders"], "labels": ["One-shot", "Endless"], "style": "segment", "suffix": ""},
+		{"type": "setting", "label": "Timer", "section": "round", "key": "end_on_seek_timeout", "values": [false, true], "labels": ["Off", "On"], "style": "toggle", "suffix": ""},
+		{"type": "setting", "label": "Hunt", "section": "round", "key": "seek_seconds", "values": [60, 90, 120, 180], "style": "slider", "suffix": "s"},
+		{"type": "setting", "label": "Gun", "section": "seeker", "key": "shot_cooldown_seconds", "values": [0.5, 1.0, 1.5, 2.5, 3.5, 5.0], "style": "slider", "suffix": "s"},
+		{"type": "setting", "label": "Scans", "section": "seeker", "key": "scan_pulse_count", "values": [0, 1, 2, 3], "style": "slider", "suffix": ""},
+		{"type": "action", "label": "Room >", "action": "next_page"}
+	]
+
+
+static func _angular_degrees(size_m: float, distance_m: float) -> float:
+	return rad_to_deg(2.0 * atan((size_m * 0.5) / distance_m))
+
+
 func _make_materials() -> void:
 	normal_material = _make_panel_material(Color(0.025, 0.055, 0.085, 0.90))
 	hover_material = _make_panel_material(Color(0.08, 0.42, 0.62, 0.97))
 	action_material = _make_panel_material(Color(0.12, 0.11, 0.18, 0.94))
-	header_material = _make_panel_material(Color(0.03, 0.16, 0.20, 0.72))
 	track_material = _make_panel_material(Color(0.10, 0.17, 0.24, 0.96))
 	fill_material = _make_panel_material(Color(0.04, 0.38, 0.50, 0.98))
 	knob_material = _make_panel_material(Color(0.72, 1.0, 1.0, 1.0))

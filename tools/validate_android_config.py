@@ -6,8 +6,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 EXPORT_PRESETS = ROOT / "game" / "export_presets.cfg"
 PROJECT = ROOT / "game" / "project.godot"
-EXPECTED_VERSION = "0.3.5"
-EXPECTED_VERSION_CODE = "14"
+EXPECTED_VERSION = "0.3.6"
+EXPECTED_VERSION_CODE = "15"
 
 
 def main() -> None:

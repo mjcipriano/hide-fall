@@ -60,6 +60,7 @@ var xr_crosshair: MeshInstance3D
 var xr_hand_menu_root: Node3D
 var xr_hand_menu_label: Label3D
 var settings_menu
+var arena_hint: Label3D
 var world_environment: WorldEnvironment
 var arena_root: Node3D
 var object_root: Node3D
@@ -184,15 +185,15 @@ func _build_world() -> void:
 	title.position = Vector3(0.0, 1.35, -2.15)
 	arena_root.add_child(title)
 
-	var start_hint := Label3D.new()
-	start_hint.name = "ArenaHint"
-	start_hint.text = "Press A to start. Open the wrist menu for settings."
-	start_hint.font_size = 32
-	start_hint.outline_size = 8
-	start_hint.pixel_size = 0.0024
-	start_hint.modulate = Color(1.0, 1.0, 1.0, 1.0)
-	start_hint.position = Vector3(0.0, 0.95, -2.15)
-	arena_root.add_child(start_hint)
+	arena_hint = Label3D.new()
+	arena_hint.name = "ArenaHint"
+	arena_hint.text = "Press A to start."
+	arena_hint.font_size = 28
+	arena_hint.outline_size = 8
+	arena_hint.pixel_size = 0.0022
+	arena_hint.modulate = Color(1.0, 1.0, 1.0, 1.0)
+	arena_hint.position = Vector3(0.0, 0.95, -2.15)
+	arena_root.add_child(arena_hint)
 
 	var light := DirectionalLight3D.new()
 	light.name = "KeyLight"
@@ -421,6 +422,14 @@ func _apply_object_look(object_id: String, obj: Dictionary) -> void:
 
 
 func _update_objects() -> void:
+	for object_id in object_nodes.keys():
+		if simulation.objects.has(object_id):
+			continue
+		var stale_node: Node3D = object_nodes[object_id]
+		object_root.remove_child(stale_node)
+		stale_node.queue_free()
+		object_nodes.erase(object_id)
+		object_looks.erase(object_id)
 	for object_id in simulation.objects:
 		if not object_nodes.has(object_id):
 			continue
@@ -469,7 +478,13 @@ func _update_hud() -> void:
 		hud_label.text = status_text
 	if settings_menu != null:
 		settings_menu.refresh_values()
+	_update_arena_hint()
 	_update_hand_menu()
+
+
+func _update_arena_hint() -> void:
+	if arena_hint != null:
+		arena_hint.visible = simulation.phase == HidefallSimulationScript.PHASE_LOBBY
 
 
 # The wrist panel is the seeker's only status readout now that the head-locked
@@ -834,6 +849,7 @@ func _start_or_restart_round(status: String) -> bool:
 	_rebuild_objects()
 	network_status = status
 	last_scan_text = "objects raining now"
+	_update_arena_hint()
 	_log_visible_gameplay_state()
 	return true
 
