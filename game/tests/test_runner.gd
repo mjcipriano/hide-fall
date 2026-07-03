@@ -10,6 +10,7 @@ const WebSocketLanHostScript := preload("res://scripts/shared/networking/websock
 const LanGameAnnouncerScript := preload("res://scripts/shared/networking/lan_game_announcer.gd")
 const LanGameBrowserScript := preload("res://scripts/shared/networking/lan_game_browser.gd")
 const PropFactoryScript := preload("res://scripts/shared/props/prop_factory.gd")
+const MinigamesScript := preload("res://scripts/shared/game_state/minigames.gd")
 const XrSettingsMenuScript := preload("res://scripts/quest/seeker/xr_settings_menu.gd")
 
 var failures := 0
@@ -715,7 +716,7 @@ func _test_hider_dash_and_mimic() -> void:
 
 
 func _test_inspection_minigame() -> void:
-	_assert(HidefallMinigames.ids().size() == 15, "there are 15 inspection minigames to keep pickups fresh")
+	_assert(MinigamesScript.ids().size() == 15, "there are 15 inspection minigames to keep pickups fresh")
 
 	var sim = _new_sim(909)
 	var pid := sim.add_hider("Wobbler")
@@ -726,7 +727,7 @@ func _test_inspection_minigame() -> void:
 	_assert(sim.set_object_held(oid, true), "seeker can inspect (grab) a live hider")
 	var insp: Dictionary = sim.objects[oid].get("inspection", {})
 	_assert(not insp.is_empty(), "grabbing a live hider starts an inspection minigame")
-	_assert(HidefallMinigames.exists(String(insp.get("minigame", ""))), "a real minigame id is chosen at random")
+	_assert(MinigamesScript.exists(String(insp.get("minigame", ""))), "a real minigame id is chosen at random")
 	_assert(String(sim.get_hider_state(pid).get("inspection", {}).get("status", "")) == "active", "snapshot exposes the active minigame to the phone")
 
 	# The phone reports a pass -> the hider stays calm and held.
@@ -1187,7 +1188,7 @@ func _test_mobile_scene_smoke() -> void:
 	# never hang (with no input each resolves by its own timeout).
 	scene.joined = true
 	scene.player_id = "p1"
-	for minigame_id in HidefallMinigames.ids():
+	for minigame_id in MinigamesScript.ids():
 		scene._minigame_start(String(minigame_id), 1)
 		var resolved := false
 		for _frame in 300:
