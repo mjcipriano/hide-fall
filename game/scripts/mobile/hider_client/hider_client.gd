@@ -10,6 +10,7 @@ const LanGameBrowserScript := preload("res://scripts/shared/networking/lan_game_
 const ContentDatabaseScript := preload("res://scripts/shared/content/content_database.gd")
 const GameConfigScript := preload("res://scripts/shared/config/game_config.gd")
 const PropFactoryScript := preload("res://scripts/shared/props/prop_factory.gd")
+const MinigamesScript := preload("res://scripts/shared/game_state/minigames.gd")
 
 const ACCENT := Color(0.18, 0.78, 0.92)
 const PANEL_BG := Color(0.07, 0.09, 0.13, 0.94)
@@ -49,14 +50,29 @@ var selected_pattern_index := 0
 var pending_shape: Variant = null
 var pending_color: Variant = null
 var pending_ability: Variant = null
-# Inspection minigame (played while the seeker is holding this hider).
-var minigame_push := 0.0
-var current_inspection: Dictionary = {}
+# Inspection minigame engine. The minigame RUNS LOCALLY on the phone (instant
+# input via real Buttons), shows instructions during an intro, then reports the
+# result to the host. See MINIGAMES.md.
 var minigame_panel: Control
+var mg_title_label: Label
+var mg_instructions_label: Label
+var mg_countdown_label: Label
+var mg_button_a: Button
+var mg_button_b: Button
+var mg_bar_area: Control
 var minigame_flash_label: Label
-var minigame_touch_index := -1
 var minigame_flash_time := 0.0
-var _mg_was_pending := false
+var mg_running := false
+var mg_awaiting_clear := false
+var mg_id := ""
+var mg_params: Dictionary = {}
+var mg_phase := "intro"
+var mg_time := 0.0
+var mg_state: Dictionary = {}
+var mg_holding := false
+var mg_drag_x := 0.0
+var mg_tap_pending := 0
+var mg_result_sent := false
 var discovered_games: Array = []
 var selected_game_index := -1
 var cam_yaw := 0.6
@@ -144,6 +160,8 @@ func _process(delta: float) -> void:
 			client.send_message(build_hider_input())
 	_animate_preview(delta)
 	_animate_world(delta)
+	if mg_running:
+		_minigame_process(delta)
 	if minigame_flash_time > 0.0:
 		minigame_flash_time -= delta
 		if minigame_flash_time <= 0.0 and minigame_flash_label != null:
@@ -182,7 +200,6 @@ func build_hider_input() -> Dictionary:
 		"request_shape": pending_shape,
 		"request_color": pending_color,
 		"ability": pending_ability,
-		"minigame_input": minigame_push,
 		"client_time": Time.get_ticks_msec() / 1000.0
 	}
 	pending_shape = null
@@ -895,29 +912,7 @@ func _build_game_ui() -> void:
 	leave_button.pressed.connect(_on_leave_pressed)
 	bar_row.add_child(leave_button)
 
-	# Inspection minigame overlay: a wide "balance" bar the player drags to keep
-	# the marker in the safe zone while the seeker holds them. Covers the middle
-	# of the screen so it's front-and-center and easy to reach with either thumb.
-	minigame_panel = Control.new()
-	minigame_panel.name = "MinigamePanel"
-	minigame_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
-	minigame_panel.offset_top = 90.0
-	minigame_panel.offset_bottom = -330.0
-	minigame_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	minigame_panel.visible = false
-	minigame_panel.draw.connect(_draw_minigame)
-	minigame_panel.gui_input.connect(_on_minigame_input)
-	game_panel.add_child(minigame_panel)
-
-	minigame_flash_label = Label.new()
-	minigame_flash_label.name = "MinigameFlash"
-	minigame_flash_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	minigame_flash_label.offset_top = 150.0
-	minigame_flash_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	minigame_flash_label.add_theme_font_size_override("font_size", 40)
-	minigame_flash_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	minigame_flash_label.visible = false
-	game_panel.add_child(minigame_flash_label)
+	_build_minigame_ui()
 
 	joystick_area = Control.new()
 	joystick_area.name = "Joystick"
@@ -998,66 +993,469 @@ func _draw_joystick() -> void:
 	joystick_area.draw_circle(knob, 30.0, Color(ACCENT.r, ACCENT.g, ACCENT.b, 0.85))
 
 
-# Renders the "Steady Hands" balance minigame: a track with a green safe zone,
-# a marker driven by the authoritative host state, and a fill bar for time left.
-# Extend with a new branch (keyed by current_inspection.minigame) for new games.
+# --- inspection minigame engine (runs locally on the phone) --------------------
+
+
+func _build_minigame_ui() -> void:
+	minigame_panel = Control.new()
+	minigame_panel.name = "MinigamePanel"
+	minigame_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	minigame_panel.offset_top = 58.0
+	minigame_panel.offset_bottom = -14.0
+	minigame_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	minigame_panel.visible = false
+	minigame_panel.draw.connect(_draw_minigame)
+	game_panel.add_child(minigame_panel)
+
+	mg_title_label = _mg_make_label(44, ACCENT, Control.PRESET_TOP_WIDE, 4.0)
+	mg_instructions_label = _mg_make_label(26, Color(0.9, 0.94, 1.0), Control.PRESET_TOP_WIDE, 60.0)
+	mg_countdown_label = _mg_make_label(72, Color(1, 1, 1), Control.PRESET_CENTER, 0.0)
+
+	mg_bar_area = Control.new()
+	mg_bar_area.name = "MgBar"
+	mg_bar_area.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	mg_bar_area.mouse_filter = Control.MOUSE_FILTER_STOP
+	mg_bar_area.gui_input.connect(_on_mg_bar_input)
+	minigame_panel.add_child(mg_bar_area)
+
+	mg_button_a = Button.new()
+	mg_button_a.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	mg_button_a.add_theme_font_size_override("font_size", 34)
+	mg_button_a.button_down.connect(_on_mg_a_down)
+	mg_button_a.button_up.connect(_on_mg_a_up)
+	minigame_panel.add_child(mg_button_a)
+
+	mg_button_b = Button.new()
+	mg_button_b.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	mg_button_b.add_theme_font_size_override("font_size", 34)
+	mg_button_b.button_down.connect(_on_mg_b_down)
+	minigame_panel.add_child(mg_button_b)
+
+	minigame_flash_label = Label.new()
+	minigame_flash_label.name = "MgFlash"
+	minigame_flash_label.set_anchors_preset(Control.PRESET_CENTER)
+	minigame_flash_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	minigame_flash_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	minigame_flash_label.add_theme_font_size_override("font_size", 48)
+	minigame_flash_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	minigame_flash_label.visible = false
+	game_panel.add_child(minigame_flash_label)
+
+
+func _mg_make_label(font_size: int, color: Color, preset: int, top: float) -> Label:
+	var label := Label.new()
+	label.set_anchors_preset(preset)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.offset_top = top
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", color)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if minigame_panel != null:
+		minigame_panel.add_child(label)
+	return label
+
+
+func _minigame_start(minigame_id: String, difficulty: int) -> void:
+	if minigame_panel == null or not MinigamesScript.exists(minigame_id):
+		return
+	mg_id = minigame_id
+	mg_params = MinigamesScript.params_for(minigame_id, difficulty)
+	mg_running = true
+	mg_result_sent = false
+	mg_phase = "intro"
+	mg_time = 0.0
+	mg_holding = false
+	mg_drag_x = 0.0
+	mg_tap_pending = 0
+	mg_state = {"presses": [], "released": false}
+	_minigame_init_state()
+	mg_title_label.text = String(mg_params.get("label", ""))
+	mg_instructions_label.text = String(mg_params.get("instructions", ""))
+	mg_countdown_label.text = "GET READY"
+	mg_countdown_label.visible = true
+	minigame_panel.visible = true
+	_mg_configure_widgets()
+	_mg_layout()
+	minigame_panel.queue_redraw()
+
+
+func _minigame_teardown() -> void:
+	mg_running = false
+	if minigame_panel != null:
+		minigame_panel.visible = false
+	if mg_button_a != null:
+		mg_button_a.visible = false
+	if mg_button_b != null:
+		mg_button_b.visible = false
+
+
+func _minigame_finish(passed: bool) -> void:
+	if mg_result_sent:
+		return
+	mg_result_sent = true
+	if joined and client != null and client.is_connected_to_host():
+		client.send_message({
+			"type": "minigame_result",
+			"version": NetworkMessageValidatorScript.PROTOCOL_VERSION,
+			"player_id": player_id,
+			"passed": passed
+		})
+	if passed:
+		_flash_minigame("STAYED STILL!", DANGER_COLORS["safe"])
+	else:
+		_flash_minigame("CAUGHT! DROPPED", DANGER_COLORS["critical"])
+	mg_awaiting_clear = true
+	_minigame_teardown()
+
+
+func _minigame_process(delta: float) -> void:
+	mg_time += delta
+	if mg_phase == "intro":
+		var remaining := float(mg_params.get("intro", 1.5)) - mg_time
+		mg_countdown_label.text = "GET READY  %.0f" % maxf(1.0, ceil(remaining))
+		if mg_time >= float(mg_params.get("intro", 1.5)):
+			mg_phase = "play"
+			mg_time = 0.0
+			mg_countdown_label.visible = false
+			mg_tap_pending = 0
+			mg_state["released"] = false
+		minigame_panel.queue_redraw()
+		return
+	_mg_layout()
+	_minigame_tick(delta)
+	mg_tap_pending = 0
+	mg_state["released"] = false
+	mg_state["presses"] = []
+	if minigame_panel != null:
+		minigame_panel.queue_redraw()
+
+
+func _minigame_init_state() -> void:
+	match mg_id:
+		"keep_center", "tightrope", "shadow", "hot_zone":
+			mg_state["dot"] = 0.0
+			mg_state["out"] = 0.0
+			mg_state["zone_center"] = 0.0
+			mg_state["jump_t"] = 0.0
+		"copy_cat":
+			var length := int(mg_params.get("length", 3))
+			var seq: Array = []
+			for _i in length:
+				seq.append("L" if randf() < 0.5 else "R")
+			mg_state["seq"] = seq
+			mg_state["idx"] = 0
+		"whack":
+			mg_state["hits"] = 0
+			mg_state["hop_t"] = 999.0
+			mg_state["target"] = Vector2(0.5, 0.5)
+		"green_light", "beat_tap":
+			mg_state["goods"] = 0
+		"mash_meter", "hold_still":
+			mg_state["fill"] = 0.0
+		"tap_count":
+			mg_state["count"] = 0
+		"twitchy":
+			mg_state["survived"] = 0
+			mg_state["flash"] = false
+		"deep_breath":
+			mg_state["err"] = 0.0
+		"perfect_stop", "let_go":
+			mg_state["done"] = false
+
+
+func _mg_configure_widgets() -> void:
+	var archetype := String(mg_params.get("archetype", "tap"))
+	mg_button_b.visible = false
+	mg_bar_area.visible = false
+	mg_button_a.visible = true
+	match archetype:
+		"drag":
+			mg_button_a.visible = false
+			mg_bar_area.visible = true
+		"hold":
+			mg_button_a.text = "HOLD"
+		"tap":
+			if mg_id == "copy_cat":
+				mg_button_a.text = "◀ L"
+				mg_button_b.text = "R ▶"
+				mg_button_b.visible = true
+			elif mg_id == "hold_still":
+				mg_button_a.text = "HOLD"
+			else:
+				mg_button_a.text = "TAP"
+
+
+func _mg_layout() -> void:
+	if minigame_panel == null:
+		return
+	var s := minigame_panel.size
+	if s.x < 1.0:
+		return
+	mg_bar_area.position = Vector2(0, s.y * 0.34)
+	mg_bar_area.size = Vector2(s.x, s.y * 0.28)
+	var bh := 118.0
+	var by := s.y - bh - 26.0
+	if mg_id == "copy_cat":
+		var bw := minf(240.0, s.x * 0.4)
+		mg_button_a.size = Vector2(bw, bh)
+		mg_button_a.position = Vector2(s.x * 0.5 - bw - 14.0, by)
+		mg_button_b.size = Vector2(bw, bh)
+		mg_button_b.position = Vector2(s.x * 0.5 + 14.0, by)
+	elif mg_id == "whack" and mg_phase == "play":
+		var wsz := 132.0
+		var target: Vector2 = mg_state.get("target", Vector2(0.5, 0.5))
+		mg_button_a.size = Vector2(wsz, wsz)
+		mg_button_a.position = Vector2(target.x * (s.x - wsz), s.y * 0.22 + target.y * (s.y * 0.5 - wsz))
+	else:
+		var bw2 := minf(360.0, s.x * 0.6)
+		mg_button_a.size = Vector2(bw2, bh)
+		mg_button_a.position = Vector2(s.x * 0.5 - bw2 * 0.5, by)
+
+
+# Per-game logic. `taps` is presses of button A this frame; `holding` is whether
+# A is held; `mg_drag_x` (-1..1) is the drag position. Calls _minigame_finish.
+func _minigame_tick(delta: float) -> void:
+	var taps := mg_tap_pending
+	var holding := mg_holding
+	var duration := float(mg_params.get("duration", 4.0))
+	match mg_id:
+		"mash_meter":
+			var target_taps := float(mg_params.get("target_taps", 12))
+			var fill := float(mg_state["fill"]) + float(taps) / target_taps
+			fill -= float(mg_params.get("drain_per_sec", 3.5)) / target_taps * delta
+			mg_state["fill"] = clampf(fill, 0.0, 1.0)
+			if fill >= 1.0:
+				_minigame_finish(true)
+			elif mg_time >= duration:
+				_minigame_finish(false)
+		"tap_count":
+			var target := int(mg_params.get("target_taps", 6))
+			mg_state["count"] = int(mg_state["count"]) + taps
+			if int(mg_state["count"]) >= target:
+				_minigame_finish(int(mg_state["count"]) == target)
+			elif mg_time >= duration:
+				_minigame_finish(false)
+		"beat_tap":
+			var needle := sin(mg_time * float(mg_params.get("sweep_speed", 1.0)) * PI)
+			if taps > 0:
+				if absf(needle) <= float(mg_params.get("window", 0.2)):
+					mg_state["goods"] = int(mg_state["goods"]) + 1
+			if int(mg_state["goods"]) >= int(mg_params.get("needed", 3)):
+				_minigame_finish(true)
+			elif mg_time >= duration:
+				_minigame_finish(false)
+		"green_light":
+			var cycle := float(mg_params.get("cycle", 1.0))
+			var is_green := fmod(mg_time, cycle) < cycle * float(mg_params.get("green_frac", 0.5))
+			if taps > 0:
+				if is_green:
+					mg_state["goods"] = int(mg_state["goods"]) + 1
+				else:
+					_minigame_finish(false)
+					return
+			if int(mg_state["goods"]) >= int(mg_params.get("needed", 3)):
+				_minigame_finish(true)
+			elif mg_time >= duration:
+				_minigame_finish(false)
+		"copy_cat":
+			var seq: Array = mg_state.get("seq", [])
+			for press in mg_state.get("presses", []):
+				var idx := int(mg_state["idx"])
+				if idx < seq.size() and String(press) == String(seq[idx]):
+					mg_state["idx"] = idx + 1
+				else:
+					_minigame_finish(false)
+					return
+			if int(mg_state["idx"]) >= seq.size():
+				_minigame_finish(true)
+			elif mg_time >= duration:
+				_minigame_finish(false)
+		"whack":
+			mg_state["hop_t"] = float(mg_state["hop_t"]) + delta
+			if taps > 0:
+				mg_state["hits"] = int(mg_state["hits"]) + 1
+				mg_state["hop_t"] = 999.0
+			if float(mg_state["hop_t"]) >= float(mg_params.get("hop", 0.8)):
+				mg_state["hop_t"] = 0.0
+				mg_state["target"] = Vector2(randf(), randf())
+			if int(mg_state["hits"]) >= int(mg_params.get("needed", 4)):
+				_minigame_finish(true)
+			elif mg_time >= duration:
+				_minigame_finish(false)
+		"perfect_stop":
+			if taps > 0 and not bool(mg_state["done"]):
+				mg_state["done"] = true
+				var marker := sin(mg_time * float(mg_params.get("speed", 1.0)) * PI)
+				_minigame_finish(absf(marker) <= float(mg_params.get("window", 0.2)))
+			elif mg_time >= duration:
+				_minigame_finish(false)
+		"hold_still":
+			if holding:
+				mg_state["fill"] = float(mg_state["fill"]) + delta
+			if float(mg_state["fill"]) >= duration:
+				_minigame_finish(true)
+			elif mg_time >= duration + 2.0:
+				_minigame_finish(false)
+		"let_go":
+			var level := fmod(mg_time * float(mg_params.get("rise", 0.6)), 1.0)
+			if bool(mg_state["released"]) and not bool(mg_state["done"]):
+				mg_state["done"] = true
+				_minigame_finish(absf(level - 0.75) <= float(mg_params.get("window", 0.15)))
+			elif mg_time >= duration:
+				_minigame_finish(false)
+		"twitchy":
+			var flashes := int(mg_params.get("flashes", 3))
+			var seg := duration / float(flashes + 1)
+			var react := float(mg_params.get("react", 0.6))
+			var idx := int(mg_time / seg)
+			var in_flash := idx >= 1 and (mg_time - float(idx) * seg) < react
+			mg_state["flash"] = in_flash
+			if in_flash and holding and (mg_time - float(idx) * seg) > react * 0.9:
+				_minigame_finish(false)
+				return
+			if mg_time >= duration:
+				_minigame_finish(true)
+		"deep_breath":
+			var period := float(mg_params.get("period", 1.5))
+			var want_hold := fmod(mg_time, period) < period * 0.5
+			var near_edge := absf(fmod(mg_time, period * 0.5)) < 0.18 or absf(fmod(mg_time, period * 0.5) - period * 0.5) < 0.18
+			if holding != want_hold and not near_edge:
+				mg_state["err"] = float(mg_state["err"]) + delta
+			else:
+				mg_state["err"] = maxf(0.0, float(mg_state["err"]) - delta)
+			if float(mg_state["err"]) >= 0.8:
+				_minigame_finish(false)
+			elif mg_time >= float(mg_params.get("cycles", 2)) * period:
+				_minigame_finish(true)
+		"keep_center", "tightrope":
+			var flip := float(mg_params.get("flip", 1.0))
+			var drift_dir := 1.0 if sin(mg_time * flip) >= 0.0 else -1.0
+			var dot := float(mg_state["dot"])
+			dot += ((mg_drag_x - dot) * 6.0 + drift_dir * float(mg_params.get("drift", 0.6))) * delta
+			mg_state["dot"] = clampf(dot, -1.0, 1.0)
+			_mg_zone_check(absf(float(mg_state["dot"])) <= float(mg_params.get("zone", 0.4)), delta, duration)
+		"shadow":
+			var target := sin(mg_time * float(mg_params.get("target_speed", 0.5)) * PI)
+			mg_state["dot"] = mg_drag_x
+			mg_state["zone_center"] = target
+			_mg_zone_check(absf(mg_drag_x - target) <= float(mg_params.get("zone", 0.35)), delta, duration)
+		"hot_zone":
+			mg_state["jump_t"] = float(mg_state["jump_t"]) + delta
+			if float(mg_state["jump_t"]) >= float(mg_params.get("jump_every", 1.2)):
+				mg_state["jump_t"] = 0.0
+				mg_state["zone_center"] = randf_range(-0.6, 0.6)
+			mg_state["dot"] = mg_drag_x
+			_mg_zone_check(absf(mg_drag_x - float(mg_state["zone_center"])) <= float(mg_params.get("zone", 0.35)), delta, duration)
+
+
+func _mg_zone_check(in_zone: bool, delta: float, duration: float) -> void:
+	if in_zone:
+		mg_state["out"] = maxf(0.0, float(mg_state["out"]) - delta)
+	else:
+		mg_state["out"] = float(mg_state["out"]) + delta
+	if float(mg_state["out"]) >= float(mg_params.get("fail_at", 1.2)):
+		_minigame_finish(false)
+	elif mg_time >= duration:
+		_minigame_finish(true)
+
+
 func _draw_minigame() -> void:
-	if minigame_panel == null or current_inspection.is_empty():
+	if minigame_panel == null or not mg_running:
 		return
-	var size := minigame_panel.size
-	minigame_panel.draw_rect(Rect2(Vector2(20, size.y * 0.2), Vector2(size.x - 40, size.y * 0.6)), Color(0.05, 0.07, 0.12, 0.92), true)
-	var minigame_id := String(current_inspection.get("minigame", ""))
-	if minigame_id == "steady_balance":
-		var margin := 60.0
-		var track_y := size.y * 0.5
-		var left := margin
-		var right := size.x - margin
-		var span := right - left
-		var mid := (left + right) * 0.5
-		var zone := clampf(float(current_inspection.get("zone", 0.5)), 0.05, 1.0)
-		var ball := clampf(float(current_inspection.get("ball", 0.0)), -1.0, 1.0)
-		var in_zone := absf(ball) <= zone
-		# Track.
-		minigame_panel.draw_line(Vector2(left, track_y), Vector2(right, track_y), Color(0.4, 0.5, 0.65, 0.7), 6.0)
-		# Safe zone.
-		var zone_half := span * 0.5 * zone
-		minigame_panel.draw_rect(Rect2(Vector2(mid - zone_half, track_y - 34), Vector2(zone_half * 2.0, 68)), Color(0.25, 0.78, 0.42, 0.28), true)
-		# Marker.
-		var ball_x := mid + ball * span * 0.5
-		var ball_color := DANGER_COLORS["safe"] if in_zone else DANGER_COLORS["critical"]
-		minigame_panel.draw_circle(Vector2(ball_x, track_y), 26.0, ball_color)
-		# Time-left fill under the track.
-		var frac := clampf(float(current_inspection.get("time_left", 0.0)) / 6.0, 0.0, 1.0)
-		minigame_panel.draw_rect(Rect2(Vector2(left, track_y + 60), Vector2(span * frac, 12)), ACCENT, true)
-
-
-func _on_minigame_input(event: InputEvent) -> void:
-	if minigame_panel == null:
+	var s := minigame_panel.size
+	minigame_panel.draw_rect(Rect2(Vector2.ZERO, s), Color(0.04, 0.06, 0.11, 0.96), true)
+	if mg_phase != "play":
 		return
-	if event is InputEventScreenTouch:
-		if event.pressed:
-			minigame_touch_index = event.index
-			_set_minigame_push_from_x(event.position.x)
-		elif event.index == minigame_touch_index:
-			minigame_touch_index = -1
-			minigame_push = 0.0
-	elif event is InputEventMouseButton:
-		minigame_touch_index = 0 if event.pressed else -1
-		if event.pressed:
-			_set_minigame_push_from_x(event.position.x)
-		else:
-			minigame_push = 0.0
-	elif event is InputEventScreenDrag or (event is InputEventMouseMotion and minigame_touch_index == 0):
-		_set_minigame_push_from_x(event.position.x)
+	var mid_y := s.y * 0.48
+	var left := s.x * 0.1
+	var right := s.x * 0.9
+	var span := right - left
+	var midx := (left + right) * 0.5
+	var archetype := String(mg_params.get("archetype", "tap"))
+	if archetype == "drag":
+		var zone := float(mg_params.get("zone", 0.4))
+		var center := float(mg_state.get("zone_center", 0.0))
+		minigame_panel.draw_line(Vector2(left, mid_y), Vector2(right, mid_y), Color(0.4, 0.5, 0.65, 0.7), 6.0)
+		minigame_panel.draw_rect(Rect2(Vector2(midx + (center - zone) * span * 0.5, mid_y - 40), Vector2(zone * span, 80)), Color(0.25, 0.78, 0.42, 0.30), true)
+		var dot := float(mg_state.get("dot", 0.0))
+		var in_zone := absf(dot - center) <= zone
+		minigame_panel.draw_circle(Vector2(midx + dot * span * 0.5, mid_y), 28.0, DANGER_COLORS["safe"] if in_zone else DANGER_COLORS["critical"])
+	elif mg_id == "beat_tap" or mg_id == "perfect_stop":
+		var speed := float(mg_params.get("sweep_speed", mg_params.get("speed", 1.0)))
+		var needle := sin(mg_time * speed * PI)
+		var window := float(mg_params.get("window", 0.2))
+		minigame_panel.draw_line(Vector2(left, mid_y), Vector2(right, mid_y), Color(0.4, 0.5, 0.65, 0.7), 6.0)
+		minigame_panel.draw_rect(Rect2(Vector2(midx - window * span * 0.5, mid_y - 40), Vector2(window * span, 80)), Color(0.25, 0.78, 0.42, 0.30), true)
+		minigame_panel.draw_circle(Vector2(midx + needle * span * 0.5, mid_y), 24.0, ACCENT)
+	elif mg_id == "green_light":
+		var cycle := float(mg_params.get("cycle", 1.0))
+		var is_green := fmod(mg_time, cycle) < cycle * float(mg_params.get("green_frac", 0.5))
+		minigame_panel.draw_rect(Rect2(Vector2(left, mid_y - 70), Vector2(span, 140)), DANGER_COLORS["safe"] if is_green else DANGER_COLORS["critical"], true)
+		_mg_draw_progress(int(mg_state.get("goods", 0)), int(mg_params.get("needed", 3)), s)
+	elif mg_id == "copy_cat":
+		var seq: Array = mg_state.get("seq", [])
+		var idx := int(mg_state.get("idx", 0))
+		for i in seq.size():
+			var col: Color = DANGER_COLORS["safe"] if i < idx else Color(0.7, 0.8, 0.95)
+			var arrow := "L" if String(seq[i]) == "L" else "R"
+			minigame_panel.draw_rect(Rect2(Vector2(left + span * (float(i) / maxf(1.0, float(seq.size()))), mid_y - 26), Vector2(span / float(seq.size()) - 8.0, 52)), Color(col.r, col.g, col.b, 0.3), true)
+	elif mg_id == "twitchy":
+		if bool(mg_state.get("flash", false)):
+			minigame_panel.draw_rect(Rect2(Vector2(left, mid_y - 70), Vector2(span, 140)), DANGER_COLORS["critical"], true)
+	else:
+		var prog := 0.0
+		if mg_id == "mash_meter" or mg_id == "hold_still":
+			prog = float(mg_state.get("fill", 0.0)) / (1.0 if mg_id == "mash_meter" else float(mg_params.get("duration", 3.0)))
+		minigame_panel.draw_rect(Rect2(Vector2(left, mid_y - 18), Vector2(span, 36)), Color(0.2, 0.25, 0.34, 0.7), true)
+		minigame_panel.draw_rect(Rect2(Vector2(left, mid_y - 18), Vector2(span * clampf(prog, 0.0, 1.0), 36)), ACCENT, true)
+		if mg_id == "tap_count":
+			_mg_draw_progress(int(mg_state.get("count", 0)), int(mg_params.get("target_taps", 6)), s)
+		elif mg_id == "whack":
+			_mg_draw_progress(int(mg_state.get("hits", 0)), int(mg_params.get("needed", 4)), s)
 
 
-# Push is how far left/right of centre the thumb is: drag toward an edge to
-# nudge the marker that way and counter the drift.
-func _set_minigame_push_from_x(x: float) -> void:
-	if minigame_panel == null:
+func _mg_draw_progress(current: int, total: int, s: Vector2) -> void:
+	var font := ThemeDB.fallback_font
+	minigame_panel.draw_string(font, Vector2(s.x * 0.5 - 40, s.y * 0.66), "%d / %d" % [current, total], HORIZONTAL_ALIGNMENT_CENTER, 120, 40, Color(1, 1, 1))
+
+
+func _on_mg_a_down() -> void:
+	if not mg_running or mg_phase != "play":
 		return
-	var mid := minigame_panel.size.x * 0.5
-	minigame_push = clampf((x - mid) / (minigame_panel.size.x * 0.35), -1.0, 1.0)
+	mg_holding = true
+	mg_tap_pending += 1
+	if mg_id == "copy_cat":
+		mg_state["presses"].append("L")
+
+
+func _on_mg_a_up() -> void:
+	mg_holding = false
+	mg_state["released"] = true
+
+
+func _on_mg_b_down() -> void:
+	if not mg_running or mg_phase != "play":
+		return
+	if mg_id == "copy_cat":
+		mg_state["presses"].append("R")
+
+
+func _on_mg_bar_input(event: InputEvent) -> void:
+	if not mg_running or mg_bar_area == null:
+		return
+	var x := -1.0
+	if event is InputEventScreenTouch and event.pressed:
+		x = event.position.x
+	elif event is InputEventScreenDrag:
+		x = event.position.x
+	elif event is InputEventMouseButton and event.pressed:
+		x = event.position.x
+	elif event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
+		x = event.position.x
+	if x >= 0.0:
+		var mid := mg_bar_area.size.x * 0.5
+		mg_drag_x = clampf((x - mid) / (mg_bar_area.size.x * 0.42), -1.0, 1.0)
 
 
 # --- input ---------------------------------------------------------------------
@@ -1221,25 +1619,18 @@ func _update_status() -> void:
 	_update_minigame()
 
 
-# Shows/hides the stay-still minigame overlay from the inspection state in the
-# latest snapshot, and flashes the outcome when it resolves.
+# Detects when an inspection begins (the seeker grabbed us) and launches the
+# local minigame; re-arms once the host clears the inspection.
 func _update_minigame() -> void:
 	var mg: Dictionary = hider_state.get("inspection", {})
-	var mg_pending := joined and not mg.is_empty() and String(mg.get("status", "")) == "pending"
-	if _mg_was_pending and not mg_pending:
-		if String(mg.get("status", "")) == "success":
-			_flash_minigame("STAYED STILL!", DANGER_COLORS.get("safe", Color(0.4, 1.0, 0.5)))
-		else:
-			_flash_minigame("WOBBLED - DROPPED!", DANGER_COLORS.get("critical", Color(1.0, 0.4, 0.4)))
-	_mg_was_pending = mg_pending
-	current_inspection = mg
-	if minigame_panel != null:
-		minigame_panel.visible = mg_pending
-		if mg_pending:
-			minigame_panel.queue_redraw()
-	if not mg_pending:
-		minigame_push = 0.0
-		minigame_touch_index = -1
+	var active := joined and not mg.is_empty() and String(mg.get("status", "")) == "active"
+	if active and not mg_running and not mg_awaiting_clear:
+		_minigame_start(String(mg.get("minigame", "")), int(mg.get("difficulty", 0)))
+	elif not active:
+		# Host cleared the inspection (resolved or dropped): stop and re-arm.
+		mg_awaiting_clear = false
+		if mg_running:
+			_minigame_teardown()
 
 
 func _flash_minigame(text: String, color: Color) -> void:
@@ -1248,7 +1639,7 @@ func _flash_minigame(text: String, color: Color) -> void:
 	minigame_flash_label.text = text
 	minigame_flash_label.add_theme_color_override("font_color", color)
 	minigame_flash_label.visible = true
-	minigame_flash_time = 1.3
+	minigame_flash_time = 1.4
 
 
 func _phase_text() -> String:

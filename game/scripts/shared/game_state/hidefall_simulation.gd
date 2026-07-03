@@ -269,14 +269,7 @@ func apply_hider_input(player_id: String, input: Dictionary) -> bool:
 	if object_id.is_empty() or not objects.has(object_id):
 		return false
 	var obj: Dictionary = objects[object_id]
-	# Stay-still minigame steering is accepted even while held (that is the whole
-	# point of the inspection), before the normal can't-move-while-held gate.
-	if input.has("minigame_input"):
-		obj["minigame_push"] = clampf(float(input.get("minigame_input", 0.0)), -1.0, 1.0)
-		objects[object_id] = obj
 	if obj.get("held_by_seeker", false) and bool(config.get_value("hiders", "cannot_move_while_held", true)):
-		# Movement stays blocked while held; the minigame push above was still
-		# captured so the hider can play the stay-still minigame.
 		return false
 	if phase != PHASE_SEEK:
 		return false
@@ -441,12 +434,18 @@ func _start_inspection(object_id: String, obj: Dictionary) -> void:
 	if not obj.get("is_hider", false) or not obj.get("alive", false):
 		return
 	var difficulty := int(obj.get("inspect_count", 0))
-	var minigame_id := String(config.get_value("hiders", "inspection_minigame", MinigamesScript.DEFAULT_MINIGAME))
-	if not MinigamesScript.exists(minigame_id):
-		minigame_id = MinigamesScript.DEFAULT_MINIGAME
-	obj["inspection"] = MinigamesScript.make_state(minigame_id, difficulty)
+	# A specific minigame id can be forced from config (handy for tests/tuning);
+	# otherwise pick a random one so every pickup feels different.
+	var forced := String(config.get_value("hiders", "inspection_minigame", ""))
+	var minigame_id := forced if MinigamesScript.exists(forced) else MinigamesScript.random_id(rng)
+	obj["inspection"] = {
+		"minigame": minigame_id,
+		"difficulty": difficulty,
+		"elapsed": 0.0,
+		"time_limit": MinigamesScript.time_limit(minigame_id, difficulty),
+		"status": "active"
+	}
 	obj["inspect_count"] = difficulty + 1
-	obj["minigame_push"] = 0.0
 	events.append({
 		"type": "inspection_started",
 		"object_id": object_id,
@@ -456,8 +455,33 @@ func _start_inspection(object_id: String, obj: Dictionary) -> void:
 	})
 
 
-# Steps every in-progress inspection minigame. A pass keeps the prop calm and
-# held; a fail makes it burst out of the seeker's grip (see _fail_inspection).
+# The phone runs the minigame and reports the outcome here. Passing keeps the
+# hider calm and held; failing pops it out (see _fail_inspection).
+func resolve_inspection(player_id: String, passed: bool) -> bool:
+	if not players.has(player_id):
+		return false
+	var object_id: String = players[player_id].get("object_id", "")
+	if object_id.is_empty() or not objects.has(object_id):
+		return false
+	var obj: Dictionary = objects[object_id]
+	if not obj.get("held_by_seeker", false) or not obj.has("inspection"):
+		return false
+	if passed:
+		obj.erase("inspection")
+		objects[object_id] = obj
+		events.append({
+			"type": "inspection_passed",
+			"object_id": object_id,
+			"player_id": player_id
+		})
+		return true
+	_fail_inspection(object_id, obj)
+	return true
+
+
+# Safety net only: if the phone never reports a result (idle/cheating/dropped
+# connection), the inspection times out as a failure so a held hider can't just
+# do nothing and stay hidden forever.
 func _update_inspections(delta: float) -> void:
 	for object_id in objects:
 		var obj: Dictionary = objects[object_id]
@@ -466,20 +490,13 @@ func _update_inspections(delta: float) -> void:
 		if not obj.get("is_hider", false) or not obj.get("alive", false):
 			continue
 		var state: Dictionary = obj["inspection"]
-		if String(state.get("status", "pending")) != "pending":
+		if String(state.get("status", "active")) != "active":
 			continue
-		state = MinigamesScript.step(state, float(obj.get("minigame_push", 0.0)), delta)
+		state["elapsed"] = float(state.get("elapsed", 0.0)) + delta
 		obj["inspection"] = state
 		objects[object_id] = obj
-		match String(state.get("status", "pending")):
-			"fail":
-				_fail_inspection(object_id, obj)
-			"success":
-				events.append({
-					"type": "inspection_passed",
-					"object_id": object_id,
-					"player_id": obj.get("owner_player_id", "")
-				})
+		if float(state["elapsed"]) >= float(state.get("time_limit", 6.0)):
+			_fail_inspection(object_id, obj)
 
 
 # The hider flunked the stay-still minigame: it shakes, yelps, and pops out of
@@ -487,7 +504,6 @@ func _update_inspections(delta: float) -> void:
 func _fail_inspection(object_id: String, obj: Dictionary) -> void:
 	obj["held_by_seeker"] = false
 	obj.erase("inspection")
-	obj["minigame_push"] = 0.0
 	obj["velocity"] = Vector3(rng.randf_range(-1.4, 1.4), 2.6, rng.randf_range(-1.4, 1.4))
 	obj["spin_axis"] = Vector3(rng.randf_range(-1.0, 1.0), rng.randf_range(-0.5, 0.5), rng.randf_range(-1.0, 1.0)).normalized()
 	obj["spin_speed"] = 6.5

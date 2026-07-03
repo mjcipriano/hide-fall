@@ -715,7 +715,8 @@ func _test_hider_dash_and_mimic() -> void:
 
 
 func _test_inspection_minigame() -> void:
-	# Failing: a held hider that ignores the minigame drifts out and is dropped.
+	_assert(HidefallMinigames.ids().size() == 15, "there are 15 inspection minigames to keep pickups fresh")
+
 	var sim = _new_sim(909)
 	var pid := sim.add_hider("Wobbler")
 	sim.start_round()
@@ -723,52 +724,55 @@ func _test_inspection_minigame() -> void:
 	_advance_for(sim, 3.0)
 	var oid: String = sim.players[pid]["object_id"]
 	_assert(sim.set_object_held(oid, true), "seeker can inspect (grab) a live hider")
-	_assert(not sim.objects[oid].get("inspection", {}).is_empty(), "grabbing a live hider starts an inspection minigame")
-	_assert(String(sim.get_hider_state(pid).get("inspection", {}).get("status", "")) == "pending", "snapshot exposes the pending minigame to the phone")
-	sim.drain_events()
-	var failed := false
-	var had_fail_event := false
-	for _i in 90:
-		sim.apply_hider_input(pid, {"move": [0, 0], "minigame_input": 0.0})
-		sim.advance(0.1)
-		for e in sim.drain_events():
-			if String(e.get("type", "")) == "inspection_failed":
-				had_fail_event = true
-		if not sim.objects[oid].get("held_by_seeker", true):
-			failed = true
-			break
-	_assert(failed, "ignoring the minigame drops the hider out of the seeker's hand")
-	_assert(had_fail_event, "a failed inspection emits a surprised-drop event")
-	_assert((sim.objects[oid]["velocity"] as Vector3).y > 0.5, "a flunked hider pops out with an upward jolt")
+	var insp: Dictionary = sim.objects[oid].get("inspection", {})
+	_assert(not insp.is_empty(), "grabbing a live hider starts an inspection minigame")
+	_assert(HidefallMinigames.exists(String(insp.get("minigame", ""))), "a real minigame id is chosen at random")
+	_assert(String(sim.get_hider_state(pid).get("inspection", {}).get("status", "")) == "active", "snapshot exposes the active minigame to the phone")
 
-	# Passing: steering the marker back to centre holds still and stays held.
+	# The phone reports a pass -> the hider stays calm and held.
+	sim.drain_events()
+	_assert(sim.resolve_inspection(pid, true), "phone can report a passed minigame")
+	_assert(sim.objects[oid].get("held_by_seeker", false), "passing keeps the hider held")
+	_assert(sim.objects[oid].get("inspection", {}).is_empty(), "passing clears the inspection")
+	var passed_evt := false
+	for e in sim.drain_events():
+		if String(e.get("type", "")) == "inspection_passed":
+			passed_evt = true
+	_assert(passed_evt, "passing emits an inspection_passed event")
+
+	# Re-inspect and report a fail -> the hider pops out with a jolt.
+	sim.set_object_held(oid, true)
+	_assert(int(sim.objects[oid].get("inspect_count", 0)) >= 2, "inspection difficulty ramps on re-inspection")
+	sim.drain_events()
+	_assert(sim.resolve_inspection(pid, false), "phone can report a failed minigame")
+	_assert(not sim.objects[oid].get("held_by_seeker", true), "failing drops the hider out of the seeker's hand")
+	_assert((sim.objects[oid]["velocity"] as Vector3).y > 0.5, "a flunked hider pops out with an upward jolt")
+	var failed_evt := false
+	for e in sim.drain_events():
+		if String(e.get("type", "")) == "inspection_failed":
+			failed_evt = true
+	_assert(failed_evt, "failing emits a surprised-drop event")
+
+	# Safety net: a held hider whose phone never answers times out and is dropped.
 	var sim2 = _new_sim(910)
-	var pid2 := sim2.add_hider("Steady")
+	var pid2 := sim2.add_hider("Idler")
 	sim2.start_round()
 	sim2.confirm_room_setup()
 	_advance_for(sim2, 3.0)
 	var oid2: String = sim2.players[pid2]["object_id"]
 	sim2.set_object_held(oid2, true)
-	var passed := false
-	for _i in 140:
-		var ball := float(sim2.objects[oid2].get("inspection", {}).get("ball", 0.0))
-		sim2.apply_hider_input(pid2, {"move": [0, 0], "minigame_input": -signf(ball)})
+	var dropped := false
+	for _i in 200:
 		sim2.advance(0.1)
-		if String(sim2.objects[oid2].get("inspection", {}).get("status", "")) == "success":
-			passed = true
-			break
 		if not sim2.objects[oid2].get("held_by_seeker", true):
+			dropped = true
 			break
-	_assert(passed, "steering the marker to centre passes the stay-still minigame")
-	_assert(sim2.objects[oid2].get("held_by_seeker", false), "passing keeps the hider held and calm, not dropped")
+	_assert(dropped, "an unanswered minigame times out and drops the hider")
 
 	# Decoys are inert when grabbed - no minigame.
 	var decoy_id: String = sim2.get_decoy_object_ids()[0]
 	sim2.set_object_held(decoy_id, true)
 	_assert(sim2.objects[decoy_id].get("inspection", {}).is_empty(), "grabbing a decoy does not start a minigame")
-
-	# Re-inspecting the same hider ramps difficulty.
-	_assert(int(sim2.objects[oid2].get("inspect_count", 0)) >= 1, "inspection count rises so repeat inspections get harder")
 
 
 func _test_end_round() -> void:
@@ -1179,6 +1183,19 @@ func _test_mobile_scene_smoke() -> void:
 	var forward_input: Dictionary = scene.build_hider_input()
 	_assert(absf(float(forward_input["move"][0])) < 0.01 and float(forward_input["move"][1]) < -0.9, "joystick up moves away from the camera")
 	scene.move_vector = Vector2.ZERO
+	# Every inspection minigame must run start-to-finish with no runtime error and
+	# never hang (with no input each resolves by its own timeout).
+	scene.joined = true
+	scene.player_id = "p1"
+	for minigame_id in HidefallMinigames.ids():
+		scene._minigame_start(String(minigame_id), 1)
+		var resolved := false
+		for _frame in 300:
+			if not scene.mg_running:
+				resolved = true
+				break
+			scene._minigame_process(0.1)
+		_assert(resolved, "inspection minigame '%s' runs to completion without hanging" % minigame_id)
 	root.remove_child(scene)
 	scene.free()
 	await process_frame

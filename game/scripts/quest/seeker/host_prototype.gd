@@ -1408,6 +1408,11 @@ func _on_network_client_message(peer_id: int, message: Dictionary) -> void:
 				var player_id: String = peer_to_player[peer_id]
 				if message.get("player_id", "") == player_id:
 					simulation.apply_hider_input(player_id, message)
+		"minigame_result":
+			if peer_to_player.has(peer_id):
+				var mg_player_id: String = peer_to_player[peer_id]
+				if message.get("player_id", "") == mg_player_id:
+					simulation.resolve_inspection(mg_player_id, bool(message.get("passed", false)))
 		"ping":
 			network_host.send_to_peer(peer_id, {"type": "pong", "version": NetworkMessageValidatorScript.PROTOCOL_VERSION, "server_time": Time.get_ticks_msec() / 1000.0})
 

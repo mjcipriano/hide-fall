@@ -6,64 +6,74 @@ inert decoy; **failing makes it shake, yelp, and jump out of the seeker's hand**
 — a dead giveaway that it was alive, but not an elimination. Difficulty ramps
 each time the same hider is re-inspected in a round.
 
-This document is the contract for adding minigames so any agent can drop a new
-one in. Keep them **mobile-friendly, thumb-reachable, and short (< ~6 seconds)**.
+Every minigame **shows its instructions first** (a ~1.5s "GET READY" intro so the
+player can read and prepare), then plays.
 
 ## Architecture
 
-All minigame *rules* live in one shared, authoritative module so the host and
-tests agree and phones cannot cheat:
+The minigame **runs locally on the phone** so input is instant (real `Button`
+nodes and a drag bar — no network round-trip per tap). The host is thin:
 
-- `game/scripts/shared/game_state/minigames.gd` (`HidefallMinigames`)
-  - `CATALOG` — id → `{label, hint, input}` metadata.
-  - `make_state(id, difficulty)` — starting state; must get harder as `difficulty` (0..6) rises.
-  - `step(state, push, delta)` — deterministic per-tick rule; sets `status` to `"success"` or `"fail"`.
-  - `snapshot(state)` — the compact, render-only view sent to phones.
+- **Host / sim** (`hidefall_simulation.gd`): on grabbing a live hider,
+  `_start_inspection` picks a random minigame (or `hiders.inspection_minigame`
+  if set) and records `{minigame, difficulty, time_limit}` in the snapshot's
+  `hider_state.inspection`. `_update_inspections` only enforces the safety
+  deadline — if the phone never reports (idle/cheat/disconnect) it auto-fails.
+  `resolve_inspection(player_id, passed)` applies the phone's reported result:
+  pass clears the inspection (calm, still held); fail runs `_fail_inspection`
+  (upward jolt + spin + `inspection_failed` event). Difficulty = how many times
+  this hider has been inspected.
+- **Network**: phone → host `minigame_result {player_id, passed}` (validated in
+  `network_message_validator.gd`); host routes it to `resolve_inspection`.
+- **Host feedback** (`host_prototype.gd`): plays `surprised` + drops the grab on
+  fail, `inspect_pass` on success.
+- **Phone engine** (`hider_client.gd`): `_update_minigame` launches the local
+  game when an inspection appears; `_minigame_start` → intro → `_minigame_tick`
+  per game → `_minigame_finish(passed)` sends the result. Input via `_on_mg_a_*`
+  / `_on_mg_b_down` (buttons) and `_on_mg_bar_input` (drag).
+- **Catalog** (`minigames.gd`, `HidefallMinigames`): single source of truth —
+  `CATALOG` (id → label, instructions, archetype), `params_for(id, difficulty)`
+  (all tuned numbers), `random_id`, `time_limit`, `INTRO_SECONDS`.
 
-Wiring (already in place, you rarely touch it):
-
-- **Sim** (`hidefall_simulation.gd`): `set_object_held(id, true)` on a live hider
-  calls `_start_inspection`; `_update_inspections(delta)` runs each seek tick and
-  calls `_fail_inspection` (pop-out jolt + `inspection_failed` event) on failure
-  or emits `inspection_passed` on success. The phone's `minigame_input` (-1..1)
-  is captured in `apply_hider_input` even while held, and stored as
-  `obj["minigame_push"]`. The inspection view rides the snapshot in
-  `get_hider_state().inspection`.
-- **Host** (`host_prototype.gd`): `_process_simulation_events` plays `surprised`
-  on fail (and drops the grab) and `inspect_pass` on success.
-- **Phone** (`hider_client.gd`): `_update_minigame` shows/hides the overlay from
-  the snapshot; `_draw_minigame` renders it; `_on_minigame_input` sends the push.
-- **Config**: `hiders.inspection_minigame_enabled` (bool) and
-  `hiders.inspection_minigame` (which id to use).
+Three input **archetypes** keep the phone code bounded: `tap` (big button, incl.
+two-button sequences), `hold` (press-and-hold), `drag` (drag a marker on a bar).
 
 ## How to add a new minigame
 
-1. **`minigames.gd` → `CATALOG`**: add `"<id>": {"label": ..., "hint": ..., "input": ...}`.
-2. **`minigames.gd` → `make_state`**: add a `match` case returning the start
-   state, tuned so higher `difficulty` is meaningfully harder.
-3. **`minigames.gd` → `step`**: add a `match` case that advances the state and
-   sets `status` to `"success"`/`"fail"`. Keep it deterministic (no RNG) so
-   headless tests are stable.
-4. **`hider_client.gd`**: add a branch to `_draw_minigame` (and, if it needs a
-   different control, `_on_minigame_input`) keyed by the same id.
-5. **Tests** (`game/tests/test_runner.gd`, `_test_inspection_minigame` or a new
-   test): assert a pass path and a fail path.
-6. **Mark it done in the table below.**
+1. **`minigames.gd` → `CATALOG`**: add `"<id>": {label, instructions, archetype}`.
+2. **`minigames.gd` → `params_for`**: add a `match` case with its tuned numbers
+   (harder as `difficulty` rises) and a `duration`.
+3. **`hider_client.gd`**: add a `match` branch to `_minigame_tick` (and a draw
+   branch in `_draw_minigame`, and init in `_minigame_init_state` if needed). If
+   it fits an existing archetype's widgets you don't touch the input handlers.
+4. **Tests**: the mobile smoke test already loops over every id and asserts it
+   runs to completion; add a rule-specific assertion if the logic is subtle.
+5. **Mark it in the table below.**
 
-To make a minigame the default, set `hiders.inspection_minigame` in
-`game/content/settings/default.json` to its id.
+Set `hiders.inspection_minigame` in `default.json` to a single id to force it
+(otherwise a random one is picked each pickup); `""` means random.
 
-## Implemented minigames
+## Implemented minigames (15)
 
-| id | label | input | difficulty scales | status | implemented |
-|----|-------|-------|-------------------|--------|-------------|
-| `steady_balance` | Steady Hands | drag left/right | zone shrinks, drift speeds up + flips faster, duration grows, out-of-zone tolerance shrinks | ✅ done | v0.3.7 (2026-07-02) |
+| id | label | archetype | goal | status |
+|----|-------|-----------|------|--------|
+| `mash_meter` | Mash! | tap | tap fast to fill the bar | ✅ v0.3.8 |
+| `tap_count` | Tap Ten | tap | tap exactly the target count | ✅ v0.3.8 |
+| `beat_tap` | On The Beat | tap | tap when the sweep is centred, N times | ✅ v0.3.8 |
+| `green_light` | Green Means Go | tap | tap only while green, N times | ✅ v0.3.8 |
+| `copy_cat` | Copy Cat | tap (2-btn) | repeat the L/R sequence | ✅ v0.3.8 |
+| `whack` | Whack-a-Prop | tap | tap the hopping target N times | ✅ v0.3.8 |
+| `perfect_stop` | Perfect Stop | tap | tap to stop the marker in the zone | ✅ v0.3.8 |
+| `hold_still` | Hold Still | hold | hold until the bar fills | ✅ v0.3.8 |
+| `let_go` | Let Go Now | hold | release while the bar is in the zone | ✅ v0.3.8 |
+| `twitchy` | Twitchy | hold | hold, but release on every flash | ✅ v0.3.8 |
+| `deep_breath` | Deep Breath | hold | hold on IN, release on OUT (rhythm) | ✅ v0.3.8 |
+| `keep_center` | Keep Centered | drag | keep the dot in the zone vs drift | ✅ v0.3.8 |
+| `shadow` | Shadow | drag | keep the dot on the moving target | ✅ v0.3.8 |
+| `hot_zone` | Hot Zone | drag | keep the dot in the jumping zone | ✅ v0.3.8 |
+| `tightrope` | Tightrope | drag | keep the dot dead-centre (tiny zone) | ✅ v0.3.8 |
 
-## Backlog ideas (not yet implemented)
+## Backlog ideas
 
-- `tap_rhythm` — tap in time with a pulsing ring; miss too many beats → drop.
-- `hold_breath` — press and hold; release exactly when a shrinking bar empties.
-- `dont_react` — decoy taps appear; tap real prompts, ignore fake-outs (Simon-ish).
-- `trace_path` — drag a dot along a wandering line without leaving it.
-
-When you implement one, move it up to the table and record the version.
+- Accelerometer "don't move the phone" game (needs device motion input).
+- Two-player co-op inspection when multiple hiders are held.

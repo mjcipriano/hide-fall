@@ -908,10 +908,20 @@ User wanted mobile hiders to change shape/color and mimic with no delay — as f
 - **Hider inspection minigames.** Picking up (inspecting) a live hider now starts a stay-still minigame on the phone; passing keeps it calm and held, failing makes it shake, yelp (`surprised` SFX), and pop out of the seeker's hand (`inspection_failed` event; the sim applies an upward jolt + spin). Difficulty ramps per re-inspection. Authoritative rules live in the new shared `game/scripts/shared/game_state/minigames.gd`; sim wires `_start_inspection`/`_update_inspections`/`_fail_inspection`, captures phone `minigame_input` in `apply_hider_input`, and ships an `inspection` view in `get_hider_state`. Config: `hiders.inspection_minigame_enabled`/`inspection_minigame`. Mobile `hider_client.gd` renders the overlay (`_draw_minigame`) and sends the push; host plays `surprised`/`inspect_pass`. POC minigame **Steady Hands** (`steady_balance`) shipped. Framework + tracking table in new **MINIGAMES.md**; AGENTS.md points to it. `_test_inspection_minigame` covers pass, fail-drop, decoy-inert, and difficulty ramp.
 - Full suite green: **311 PASS, 0 FAIL** (`Godot tests passed`); `validate_content.py` passes.
 
+## 2026-07-03 Follow-up: Minigames reworked to run on the phone + 15 of them (v0.3.8)
+
+User reported the v0.3.7 minigame felt dead ("pressing didn't do anything") and asked for an instructions/intro phase and 15 different minigames.
+
+- **Root cause:** the minigame was host-authoritative (phone sent a drag value, host simulated the marker, phone rendered the lagged ~10Hz snapshot). Round-trip latency + drag-on-a-Control made it feel unresponsive.
+- **Rework — minigame now runs locally on the phone.** The host just picks a random minigame on grab, ships `{minigame, difficulty, time_limit}` in `hider_state.inspection`, enforces a safety deadline (`_update_inspections` auto-fails an unanswered inspection so idling can't stall), and applies the phone's reported result via new `resolve_inspection(player_id, passed)` → pass keeps it held/clears; fail runs `_fail_inspection` (jolt + `inspection_failed`). New client→host `minigame_result {player_id, passed}` message (validated). Removed the old per-tick host minigame sim and `minigame_input` capture.
+- **Instructions/intro:** every minigame shows its label + instructions for a ~1.5s "GET READY" intro before it starts scoring.
+- **15 minigames** across 3 input archetypes (tap / hold / drag) using **real `Button` nodes + a drag bar** (fixes the dead-press problem): mash_meter, tap_count, beat_tap, green_light, copy_cat (2-button sequence), whack, perfect_stop, hold_still, let_go, twitchy, deep_breath, keep_center, shadow, hot_zone, tightrope. Catalog/tuning in `minigames.gd` (`HidefallMinigames`); phone engine in `hider_client.gd`. `hiders.inspection_minigame` defaults to `""` = random each pickup.
+- Tests: sim covers start/pass/fail/deadline/decoy-inert/difficulty-ramp and the 15-count; the mobile smoke test loops over all 15 and asserts each runs to completion with no runtime error and no hang. Full `make test` green (**332 PASS, 0 FAIL**). Bumped to 0.3.8 / versionCode 17 (export_presets.cfg ×2 + validate_android_config.py).
+- Note: the phone-side minigame *feel* (button sizing, difficulty, readability) is smoke-covered only, not device-tested here — needs an on-phone play pass.
+
 ## Next
 
-1. Bump version to 0.3.7, build APKs, smoke on Quest, commit, push, cut GitHub release.
-2. Reconfirm on hardware: hunt shows no clock with Timer off; the wrist menu laser/dot + bigger fonts read well; pick up a bot hider to feel the Steady Hands minigame + shake-drop.
+1. Install the mobile APK on the phone and actually play the minigames when picked up: confirm pressing/holding/dragging responds instantly, instructions show first, and difficulty feels fair as it ramps.
 2. Complete `v0.3.6` release: commit, tag, push, GitHub Actions release, released-asset checksum/artifact verification, and released Quest smoke.
 2. Install the latest mobile APK on the Android phone and verify in a real round: fullscreen, snappy joystick, Dash, Mimic, Quake, Ping, and the endless-hiders respawn flash.
 3. In headset, feel-check the final 24cm x 26cm paged settings menu and status panel text fit during a real round.

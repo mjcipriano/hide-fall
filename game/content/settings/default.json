@@ -42,7 +42,7 @@
     "abilities_enabled": false,
     "cannot_move_while_held": true,
     "inspection_minigame_enabled": true,
-    "inspection_minigame": "steady_balance",
+    "inspection_minigame": "",
     "bot_decision_seconds": 1.6,
     "bot_count": 2
   },

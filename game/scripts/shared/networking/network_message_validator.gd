@@ -2,7 +2,7 @@ class_name NetworkMessageValidator
 extends RefCounted
 
 const PROTOCOL_VERSION := 1
-const CLIENT_TYPES := ["join_request", "hider_input", "ready_state", "ping"]
+const CLIENT_TYPES := ["join_request", "hider_input", "ready_state", "ping", "minigame_result"]
 const HOST_TYPES := ["join_accepted", "join_rejected", "state_snapshot", "round_results", "pong"]
 
 
@@ -25,6 +25,10 @@ static func validate_client_message(message: Dictionary) -> Array[String]:
 			_require_string(message, "player_id", errors)
 			if not message.get("ready", null) is bool:
 				errors.append("ready_state.ready must be boolean")
+		"minigame_result":
+			_require_string(message, "player_id", errors)
+			if not message.get("passed", null) is bool:
+				errors.append("minigame_result.passed must be boolean")
 	return errors
 
 
