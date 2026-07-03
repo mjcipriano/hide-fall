@@ -60,11 +60,15 @@ var mg_countdown_label: Label
 var mg_button_a: Button
 var mg_button_b: Button
 var mg_bar_area: Control
+var mg_prompt_label: Label
+var mg_choice_buttons: Array[Button] = []
+var mg_rng := RandomNumberGenerator.new()
 var minigame_flash_label: Label
 var minigame_flash_time := 0.0
 var mg_running := false
 var mg_awaiting_clear := false
 var mg_id := ""
+var mg_difficulty := 0
 var mg_params: Dictionary = {}
 var mg_phase := "intro"
 var mg_time := 0.0
@@ -1044,6 +1048,26 @@ func _build_minigame_ui() -> void:
 	mg_button_b.button_down.connect(_on_mg_b_down)
 	minigame_panel.add_child(mg_button_b)
 
+	mg_prompt_label = Label.new()
+	mg_prompt_label.name = "MgPrompt"
+	mg_prompt_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	mg_prompt_label.offset_top = 120.0
+	mg_prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mg_prompt_label.add_theme_font_size_override("font_size", 54)
+	mg_prompt_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mg_prompt_label.visible = false
+	minigame_panel.add_child(mg_prompt_label)
+
+	for i in 6:
+		var cb := Button.new()
+		cb.name = "MgChoice%d" % i
+		cb.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		cb.add_theme_font_size_override("font_size", 30)
+		cb.visible = false
+		cb.pressed.connect(_on_mg_choice.bind(i))
+		minigame_panel.add_child(cb)
+		mg_choice_buttons.append(cb)
+
 	practice_exit_button = Button.new()
 	practice_exit_button.name = "PracticeExit"
 	practice_exit_button.text = "EXIT"
@@ -1084,6 +1108,7 @@ func _minigame_start(minigame_id: String, difficulty: int) -> void:
 	if minigame_panel == null or not MinigamesScript.exists(minigame_id):
 		return
 	mg_id = minigame_id
+	mg_difficulty = difficulty
 	mg_params = MinigamesScript.params_for(minigame_id, difficulty)
 	mg_running = true
 	mg_result_sent = false
@@ -1092,6 +1117,7 @@ func _minigame_start(minigame_id: String, difficulty: int) -> void:
 	mg_holding = false
 	mg_drag_x = 0.0
 	mg_tap_pending = 0
+	mg_rng.randomize()
 	mg_state = {"presses": [], "released": false}
 	_minigame_init_state()
 	mg_title_label.text = String(mg_params.get("label", ""))
@@ -1202,7 +1228,32 @@ func _minigame_process(delta: float) -> void:
 
 
 func _minigame_init_state() -> void:
+	if String(mg_params.get("archetype", "")) == "choice":
+		_mg_init_choice()
+		return
 	match mg_id:
+		"bullseye":
+			mg_state["goods"] = 0
+		"metronome":
+			mg_state["hits"] = 0
+			mg_state["last_beat"] = -1
+		"reflex":
+			mg_state["green"] = false
+			mg_state["hits"] = 0
+			mg_state["next_at"] = randf_range(float(mg_params.get("min_wait", 0.6)), float(mg_params.get("max_wait", 2.0)))
+		"charge_up":
+			mg_state["level"] = 0.0
+			mg_state["done"] = false
+		"pulse_hold":
+			mg_state["err"] = 0.0
+		"trace_wave":
+			mg_state["dot"] = 0.0
+			mg_state["out"] = 0.0
+			mg_state["zone_center"] = 0.0
+		"hot_cold":
+			mg_state["dot"] = 0.0
+			mg_state["target"] = randf_range(-0.7, 0.7)
+			mg_state["near_t"] = 0.0
 		"keep_center", "tightrope", "shadow", "hot_zone":
 			mg_state["dot"] = 0.0
 			mg_state["out"] = 0.0
@@ -1234,17 +1285,39 @@ func _minigame_init_state() -> void:
 			mg_state["done"] = false
 
 
+func _mg_init_choice() -> void:
+	mg_state["rounds_won"] = 0
+	mg_state["rounds_needed"] = int(mg_params.get("rounds_needed", 3))
+	mg_state["lives"] = 1
+	mg_state["show_left"] = float(mg_params.get("show", 0.0))
+	mg_state["round"] = MinigamesScript.make_round(mg_id, mg_difficulty, mg_rng)
+	if mg_id == "simon_say":
+		mg_state["seq"] = (mg_state["round"] as Dictionary).get("sequence", [])
+		mg_state["input_idx"] = 0
+		mg_state["show_left"] = 0.55 * float((mg_state["seq"] as Array).size()) + 0.5
+
+
 func _mg_configure_widgets() -> void:
 	var archetype := String(mg_params.get("archetype", "tap"))
 	mg_button_b.visible = false
 	mg_bar_area.visible = false
 	mg_button_a.visible = true
+	if mg_prompt_label != null:
+		mg_prompt_label.visible = false
+	for cb in mg_choice_buttons:
+		cb.visible = false
 	match archetype:
 		"drag":
 			mg_button_a.visible = false
 			mg_bar_area.visible = true
 		"hold":
 			mg_button_a.text = "HOLD"
+		"choice":
+			mg_button_a.visible = false
+			var options: Array = (mg_state.get("round", {}) as Dictionary).get("options", [])
+			for i in mg_choice_buttons.size():
+				if i < options.size():
+					mg_choice_buttons[i].text = String(options[i])
 		"tap":
 			if mg_id == "copy_cat":
 				mg_button_a.text = "◀ L"
@@ -1252,8 +1325,113 @@ func _mg_configure_widgets() -> void:
 				mg_button_b.visible = true
 			elif mg_id == "hold_still":
 				mg_button_a.text = "HOLD"
+			elif mg_id == "bullseye":
+				mg_button_a.text = "TAP!"
+			elif mg_id == "reflex" or mg_id == "metronome":
+				mg_button_a.text = "TAP"
 			else:
 				mg_button_a.text = "TAP"
+
+
+# --- choice (word/quiz) engine ---
+func _mg_choice_tick(delta: float) -> void:
+	var duration := float(mg_params.get("duration", 6.0))
+	var round: Dictionary = mg_state.get("round", {})
+	if float(mg_state.get("show_left", 0.0)) > 0.0:
+		mg_state["show_left"] = float(mg_state["show_left"]) - delta
+		_mg_show_choice_prompt(round, true)
+		_mg_set_choices_visible(false)
+		if float(mg_state["show_left"]) <= 0.0:
+			_mg_set_choices_visible(true)
+		return
+	_mg_show_choice_prompt(round, false)
+	_mg_set_choices_visible(true)
+	if mg_time >= duration:
+		_minigame_finish(int(mg_state.get("rounds_won", 0)) >= int(mg_state.get("rounds_needed", 1)))
+
+
+func _mg_show_choice_prompt(round: Dictionary, memorizing: bool) -> void:
+	if mg_prompt_label == null:
+		return
+	var text := String(round.get("prompt", ""))
+	var color := Color(0.95, 0.97, 1.0)
+	if memorizing:
+		if mg_id == "word_recall":
+			text = String(round.get("memorize", text))
+		elif mg_id == "simon_say":
+			var names: Array = []
+			for idx in mg_state.get("seq", []):
+				var opts: Array = round.get("options", [])
+				if int(idx) < opts.size():
+					names.append(String(opts[int(idx)]))
+			text = " - ".join(names)
+	else:
+		if mg_id == "word_recall":
+			text = "TAP THE WORD"
+		elif mg_id == "simon_say":
+			text = "REPEAT!"
+	if round.has("prompt_color"):
+		color = _mg_color_from_name(String(round["prompt_color"]))
+	mg_prompt_label.text = text
+	mg_prompt_label.add_theme_color_override("font_color", color)
+	mg_prompt_label.visible = true
+
+
+func _mg_set_choices_visible(shown: bool) -> void:
+	var n: int = (mg_state.get("round", {}) as Dictionary).get("options", []).size()
+	for i in mg_choice_buttons.size():
+		mg_choice_buttons[i].visible = shown and i < n
+
+
+func _mg_next_round() -> void:
+	mg_state["round"] = MinigamesScript.make_round(mg_id, mg_difficulty, mg_rng)
+	var round: Dictionary = mg_state["round"]
+	var options: Array = round.get("options", [])
+	for i in mg_choice_buttons.size():
+		if i < options.size():
+			mg_choice_buttons[i].text = String(options[i])
+	_mg_show_choice_prompt(round, false)
+	_mg_set_choices_visible(true)
+	_mg_layout()
+
+
+func _on_mg_choice(index: int) -> void:
+	if not mg_running or mg_phase != "play" or float(mg_state.get("show_left", 0.0)) > 0.0:
+		return
+	var round: Dictionary = mg_state.get("round", {})
+	if mg_id == "simon_say":
+		var seq: Array = mg_state.get("seq", [])
+		var ii := int(mg_state.get("input_idx", 0))
+		if ii < seq.size() and index == int(seq[ii]):
+			mg_state["input_idx"] = ii + 1
+			if ii + 1 >= seq.size():
+				_minigame_finish(true)
+		else:
+			_minigame_finish(false)
+		return
+	if index == int(round.get("correct", -1)):
+		mg_state["rounds_won"] = int(mg_state.get("rounds_won", 0)) + 1
+		if int(mg_state["rounds_won"]) >= int(mg_state.get("rounds_needed", 1)):
+			_minigame_finish(true)
+		else:
+			_mg_next_round()
+	else:
+		mg_state["lives"] = int(mg_state.get("lives", 1)) - 1
+		if int(mg_state["lives"]) < 0:
+			_minigame_finish(false)
+		else:
+			_mg_next_round()
+
+
+func _mg_color_from_name(name: String) -> Color:
+	match name:
+		"RED": return Color(0.94, 0.28, 0.26)
+		"BLUE": return Color(0.28, 0.5, 0.95)
+		"GREEN": return Color(0.3, 0.8, 0.42)
+		"YELLOW": return Color(0.95, 0.85, 0.25)
+		"PURPLE": return Color(0.7, 0.4, 0.9)
+		"ORANGE": return Color(0.98, 0.6, 0.2)
+	return Color(0.9, 0.92, 1.0)
 
 
 func _mg_layout() -> void:
@@ -1266,6 +1444,20 @@ func _mg_layout() -> void:
 	mg_bar_area.size = Vector2(s.x, s.y * 0.28)
 	var bh := 118.0
 	var by := s.y - bh - 26.0
+	if String(mg_params.get("archetype", "")) == "choice":
+		var opts: Array = (mg_state.get("round", {}) as Dictionary).get("options", [])
+		var n := opts.size()
+		var cbw := (s.x - 70.0) * 0.5
+		var cbh := minf(104.0, (s.y * 0.44) / 2.0 - 16.0)
+		var startx := 30.0
+		var starty := s.y * 0.46
+		for i in mg_choice_buttons.size():
+			if i < n:
+				var col := i % 2
+				var row := i / 2
+				mg_choice_buttons[i].size = Vector2(cbw, cbh)
+				mg_choice_buttons[i].position = Vector2(startx + float(col) * (cbw + 10.0), starty + float(row) * (cbh + 14.0))
+		return
 	if mg_id == "copy_cat":
 		var bw := minf(240.0, s.x * 0.4)
 		mg_button_a.size = Vector2(bw, bh)
@@ -1286,10 +1478,89 @@ func _mg_layout() -> void:
 # Per-game logic. `taps` is presses of button A this frame; `holding` is whether
 # A is held; `mg_drag_x` (-1..1) is the drag position. Calls _minigame_finish.
 func _minigame_tick(delta: float) -> void:
+	if String(mg_params.get("archetype", "")) == "choice":
+		_mg_choice_tick(delta)
+		return
 	var taps := mg_tap_pending
 	var holding := mg_holding
 	var duration := float(mg_params.get("duration", 4.0))
 	match mg_id:
+		"bullseye":
+			var r := absf(sin(mg_time * float(mg_params.get("speed", 1.0)) * PI))
+			if taps > 0 and r <= float(mg_params.get("window", 0.15)):
+				mg_state["goods"] = int(mg_state.get("goods", 0)) + 1
+			if int(mg_state.get("goods", 0)) >= int(mg_params.get("needed", 1)):
+				_minigame_finish(true)
+			elif mg_time >= duration:
+				_minigame_finish(false)
+		"metronome":
+			var period := float(mg_params.get("period", 0.7))
+			if taps > 0:
+				var phase := fmod(mg_time, period)
+				if phase < float(mg_params.get("window", 0.18)) or phase > period - float(mg_params.get("window", 0.18)):
+					var beat_idx := int(round(mg_time / period))
+					if beat_idx != int(mg_state.get("last_beat", -1)):
+						mg_state["hits"] = int(mg_state.get("hits", 0)) + 1
+						mg_state["last_beat"] = beat_idx
+			if int(mg_state.get("hits", 0)) >= int(mg_params.get("beats", 4)):
+				_minigame_finish(true)
+			elif mg_time >= duration:
+				_minigame_finish(false)
+		"reflex":
+			if not bool(mg_state.get("green", false)):
+				if mg_time >= float(mg_state.get("next_at", 1.0)):
+					mg_state["green"] = true
+				elif taps > 0:
+					_minigame_finish(false)
+					return
+			elif taps > 0:
+				mg_state["hits"] = int(mg_state.get("hits", 0)) + 1
+				mg_state["green"] = false
+				mg_state["next_at"] = mg_time + randf_range(float(mg_params.get("min_wait", 0.6)), float(mg_params.get("max_wait", 2.0)))
+				if int(mg_state["hits"]) >= int(mg_params.get("needed", 2)):
+					_minigame_finish(true)
+			if mg_time >= duration and mg_running:
+				_minigame_finish(int(mg_state.get("hits", 0)) >= int(mg_params.get("needed", 2)))
+		"charge_up":
+			var level := float(mg_state.get("level", 0.0))
+			level += (float(mg_params.get("rise", 0.5)) if holding else -0.3) * delta
+			level = clampf(level, 0.0, 1.2)
+			mg_state["level"] = level
+			if bool(mg_state.get("released", false)) and not bool(mg_state.get("done", false)) and level > 0.1:
+				mg_state["done"] = true
+				_minigame_finish(absf(level - float(mg_params.get("target", 0.75))) <= float(mg_params.get("window", 0.12)))
+			elif mg_time >= duration:
+				_minigame_finish(false)
+		"pulse_hold":
+			var pperiod := float(mg_params.get("period", 1.2))
+			var green_frac := float(mg_params.get("green_frac", 0.5))
+			var is_green := fmod(mg_time, pperiod) < pperiod * green_frac
+			var phase2 := fmod(mg_time, pperiod)
+			var near := phase2 < 0.16 or absf(phase2 - pperiod * green_frac) < 0.16 or phase2 > pperiod - 0.16
+			if holding != is_green and not near:
+				mg_state["err"] = float(mg_state.get("err", 0.0)) + delta
+			else:
+				mg_state["err"] = maxf(0.0, float(mg_state.get("err", 0.0)) - delta)
+			if float(mg_state.get("err", 0.0)) >= 0.7:
+				_minigame_finish(false)
+			elif mg_time >= float(mg_params.get("cycles", 2)) * pperiod:
+				_minigame_finish(true)
+		"trace_wave":
+			var twtarget := sin(mg_time * float(mg_params.get("target_speed", 0.6)) * PI)
+			mg_state["dot"] = mg_drag_x
+			mg_state["zone_center"] = twtarget
+			_mg_zone_check(absf(mg_drag_x - twtarget) <= float(mg_params.get("zone", 0.35)), delta, duration)
+		"hot_cold":
+			mg_state["dot"] = mg_drag_x
+			var dist := absf(mg_drag_x - float(mg_state.get("target", 0.0)))
+			if dist <= float(mg_params.get("tolerance", 0.1)):
+				mg_state["near_t"] = float(mg_state.get("near_t", 0.0)) + delta
+			else:
+				mg_state["near_t"] = 0.0
+			if float(mg_state.get("near_t", 0.0)) >= float(mg_params.get("hold_time", 0.5)):
+				_minigame_finish(true)
+			elif mg_time >= duration:
+				_minigame_finish(false)
 		"mash_meter":
 			var target_taps := float(mg_params.get("target_taps", 12))
 			var fill := float(mg_state["fill"]) + float(taps) / target_taps
@@ -1443,6 +1714,43 @@ func _draw_minigame() -> void:
 	var span := right - left
 	var midx := (left + right) * 0.5
 	var archetype := String(mg_params.get("archetype", "tap"))
+	if archetype == "choice":
+		_mg_draw_progress(int(mg_state.get("rounds_won", 0)), int(mg_state.get("rounds_needed", 1)), s)
+		return
+	if mg_id == "hot_cold":
+		var hdot := float(mg_state.get("dot", 0.0))
+		var hdist := absf(hdot - float(mg_state.get("target", 0.0)))
+		var warm := clampf(1.0 - hdist / 1.2, 0.0, 1.0)
+		minigame_panel.draw_line(Vector2(left, mid_y), Vector2(right, mid_y), Color(0.4, 0.5, 0.65, 0.7), 6.0)
+		minigame_panel.draw_circle(Vector2(midx + hdot * span * 0.5, mid_y), 30.0, Color(0.2 + 0.75 * warm, 0.4 + 0.25 * warm, 1.0 - 0.7 * warm))
+		return
+	if mg_id == "bullseye":
+		var r := absf(sin(mg_time * float(mg_params.get("speed", 1.0)) * PI))
+		minigame_panel.draw_arc(Vector2(midx, mid_y), span * 0.28 * (0.12 + r), 0.0, TAU, 40, ACCENT, 6.0)
+		minigame_panel.draw_circle(Vector2(midx, mid_y), 9.0, DANGER_COLORS["safe"])
+		_mg_draw_progress(int(mg_state.get("goods", 0)), int(mg_params.get("needed", 1)), s)
+		return
+	if mg_id == "reflex":
+		minigame_panel.draw_rect(Rect2(Vector2(left, mid_y - 70), Vector2(span, 140)), DANGER_COLORS["safe"] if bool(mg_state.get("green", false)) else DANGER_COLORS["critical"], true)
+		_mg_draw_progress(int(mg_state.get("hits", 0)), int(mg_params.get("needed", 2)), s)
+		return
+	if mg_id == "metronome":
+		var mphase := fmod(mg_time, float(mg_params.get("period", 0.7))) / float(mg_params.get("period", 0.7))
+		minigame_panel.draw_circle(Vector2(midx, mid_y), 20.0 + 44.0 * clampf(1.0 - mphase * 3.0, 0.0, 1.0), ACCENT)
+		_mg_draw_progress(int(mg_state.get("hits", 0)), int(mg_params.get("beats", 4)), s)
+		return
+	if mg_id == "charge_up":
+		var level := float(mg_state.get("level", 0.0))
+		var ctarget := float(mg_params.get("target", 0.75))
+		var cwindow := float(mg_params.get("window", 0.12))
+		minigame_panel.draw_rect(Rect2(Vector2(left, mid_y - 18), Vector2(span, 36)), Color(0.2, 0.25, 0.34, 0.7), true)
+		minigame_panel.draw_rect(Rect2(Vector2(left + span * (ctarget - cwindow), mid_y - 26), Vector2(span * cwindow * 2.0, 52)), Color(0.25, 0.78, 0.42, 0.35), true)
+		minigame_panel.draw_rect(Rect2(Vector2(left, mid_y - 18), Vector2(span * clampf(level, 0.0, 1.0), 36)), ACCENT, true)
+		return
+	if mg_id == "pulse_hold":
+		var phg := fmod(mg_time, float(mg_params.get("period", 1.2))) < float(mg_params.get("period", 1.2)) * float(mg_params.get("green_frac", 0.5))
+		minigame_panel.draw_rect(Rect2(Vector2(left, mid_y - 70), Vector2(span, 140)), DANGER_COLORS["safe"] if phg else DANGER_COLORS["critical"], true)
+		return
 	if archetype == "drag":
 		var zone := float(mg_params.get("zone", 0.4))
 		var center := float(mg_state.get("zone_center", 0.0))

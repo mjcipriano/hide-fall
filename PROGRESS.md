@@ -925,9 +925,18 @@ User reported the v0.3.7 minigame felt dead ("pressing didn't do anything") and 
 - Verified `make test` on a fresh `.godot` cache (the CI clean-checkout condition).
 - Quest install conflict diagnosed for the user: the on-device smoke builds are **debug-signed** (`CN=Android Debug`) while the GitHub release is **upload-key signed**, so installing the release over the debug build fails with a signature/package conflict; a full uninstall of `com.mjcipriano.hidefall.quest` (SideQuest/Settings/adb, not just "remove from library") is required. TODO: sign local smoke builds with the upload key so device installs always match the release.
 
+## 2026-07-03 Follow-up: 30 more minigames -> 45 total (v0.3.10)
+
+- Added a **choice** archetype (a grid of labelled buttons; answer a few rounds) so word/quiz games are data-driven: each is just a `HidefallMinigames.make_round(id, difficulty, rng)` generator returning `{prompt, options, correct}` (+ optional `prompt_color`, `memorize`, `sequence`). Content banks (words, rhymes, opposites, categories, emojis, colours) live in `minigames.gd`.
+- **30 new minigames** (total 45): 22 word/quiz choice games (odd_one_out, category_tap, real_word, rhyme_time, opposite, spell_check, unscramble, missing_letter, first_letter, count_letters, count_vowels, longer_word, double_letter, emoji_match, stroop, math_add, math_sub, true_math, which_bigger, which_smaller, odd_number, word_recall), a Simon sequence + memory word_recall, and 8 more action games (bullseye, metronome, reflex, charge_up, pulse_hold, trace_wave, hot_cold). Choice games run a few rounds (one mistake forgiven) and are a bit longer (~6.5-10s).
+- Phone engine (`hider_client.gd`): choice buttons grid + prompt label; `_mg_choice_tick`/`_mg_next_round`/`_on_mg_choice`; memorize/show phase; `_minigame_tick`/`_draw_minigame` branches for the new action games.
+- Tests: count is now 45; new assertion validates every choice generator (options>=2, correct index in range, simon has a sequence) across difficulties/seeds; the runs-to-completion loop already covers all 45. `make test` green on a fresh `.godot` cache. Bumped to 0.3.10 / versionCode 19.
+- Note: still smoke-only, not device-played — the feel/readability of the word games on a phone needs a real play pass (esp. font sizes for prompts/options).
+
 ## Next
 
-1. Uninstall the debug-signed `com.mjcipriano.hidefall.quest` from the Quest (SideQuest or adb) so the upload-signed release installs; consider signing local builds with the upload key to prevent recurrence.
+1. Play the new word/quiz games on the phone (PRACTICE MINIGAMES) — check prompt/option readability, difficulty, and that the choice buttons are comfortably tappable.
+2. Uninstall the debug-signed `com.mjcipriano.hidefall.quest` from the Quest (SideQuest or adb) so the upload-signed release installs; consider signing local builds with the upload key to prevent recurrence.
 2. Install the mobile APK on the phone: try PRACTICE MINIGAMES from the menu, and get picked up in a real round — confirm pressing/holding/dragging responds instantly, instructions show first, difficulty ramps fairly.
 2. Complete `v0.3.6` release: commit, tag, push, GitHub Actions release, released-asset checksum/artifact verification, and released Quest smoke.
 2. Install the latest mobile APK on the Android phone and verify in a real round: fullscreen, snappy joystick, Dash, Mimic, Quake, Ping, and the endless-hiders respawn flash.

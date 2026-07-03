@@ -716,7 +716,32 @@ func _test_hider_dash_and_mimic() -> void:
 
 
 func _test_inspection_minigame() -> void:
-	_assert(MinigamesScript.ids().size() == 15, "there are 15 inspection minigames to keep pickups fresh")
+	_assert(MinigamesScript.ids().size() == 45, "there are 45 inspection minigames to keep pickups fresh")
+	# Every word/quiz (choice) game must generate valid rounds across difficulties.
+	var mr_ok := true
+	var mr_detail := ""
+	var mr_rng := RandomNumberGenerator.new()
+	for mid in MinigamesScript.ids():
+		if MinigamesScript.archetype(String(mid)) != "choice":
+			continue
+		for diff in [0, 3, 6]:
+			for si in range(8):
+				mr_rng.seed = si * 131 + diff * 7 + abs(String(mid).hash())
+				var r: Dictionary = MinigamesScript.make_round(String(mid), diff, mr_rng)
+				var opts: Array = r.get("options", [])
+				if opts.size() < 2:
+					mr_ok = false
+					mr_detail = "%s has %d options" % [mid, opts.size()]
+				elif String(mid) == "simon_say":
+					if (r.get("sequence", []) as Array).is_empty():
+						mr_ok = false
+						mr_detail = "%s empty sequence" % mid
+				else:
+					var c := int(r.get("correct", -1))
+					if c < 0 or c >= opts.size():
+						mr_ok = false
+						mr_detail = "%s bad correct index %d" % [mid, c]
+	_assert(mr_ok, "every choice minigame generates valid rounds (%s)" % mr_detail)
 
 	var sim = _new_sim(909)
 	var pid := sim.add_hider("Wobbler")

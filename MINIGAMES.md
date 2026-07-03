@@ -35,43 +35,44 @@ nodes and a drag bar — no network round-trip per tap). The host is thin:
   `CATALOG` (id → label, instructions, archetype), `params_for(id, difficulty)`
   (all tuned numbers), `random_id`, `time_limit`, `INTRO_SECONDS`.
 
-Three input **archetypes** keep the phone code bounded: `tap` (big button, incl.
-two-button sequences), `hold` (press-and-hold), `drag` (drag a marker on a bar).
+Four input **archetypes** keep the phone code bounded: `tap` (big button, incl.
+two-button sequences), `hold` (press-and-hold), `drag` (drag a marker on a bar),
+and `choice` (a grid of labelled buttons — answer a few rounds; the game is just
+a `make_round()` content generator).
 
 ## How to add a new minigame
 
 1. **`minigames.gd` → `CATALOG`**: add `"<id>": {label, instructions, archetype}`.
 2. **`minigames.gd` → `params_for`**: add a `match` case with its tuned numbers
    (harder as `difficulty` rises) and a `duration`.
-3. **`hider_client.gd`**: add a `match` branch to `_minigame_tick` (and a draw
-   branch in `_draw_minigame`, and init in `_minigame_init_state` if needed). If
-   it fits an existing archetype's widgets you don't touch the input handlers.
-4. **Tests**: the mobile smoke test already loops over every id and asserts it
-   runs to completion; add a rule-specific assertion if the logic is subtle.
-5. **Mark it in the table below.**
+3. **For a word/quiz game** (archetype `choice`): just add a `make_round()` case
+   that returns `{prompt, options: [String], correct: int}` (optionally
+   `prompt_color`, `memorize`, or `sequence`). The engine handles the rest.
+   **For an action game**: add a `_minigame_tick` branch in `hider_client.gd`
+   (plus a `_draw_minigame` branch and `_minigame_init_state` if needed).
+4. **Tests**: the mobile smoke test loops over every id and asserts it runs to
+   completion; `_test_inspection_minigame` validates every `choice` generator.
+5. **Bump the count in `_test_inspection_minigame` and mark it below.**
 
 Set `hiders.inspection_minigame` in `default.json` to a single id to force it
 (otherwise a random one is picked each pickup); `""` means random.
 
-## Implemented minigames (15)
+## Implemented minigames (45)
 
-| id | label | archetype | goal | status |
-|----|-------|-----------|------|--------|
-| `mash_meter` | Mash! | tap | tap fast to fill the bar | ✅ v0.3.8 |
-| `tap_count` | Tap Ten | tap | tap exactly the target count | ✅ v0.3.8 |
-| `beat_tap` | On The Beat | tap | tap when the sweep is centred, N times | ✅ v0.3.8 |
-| `green_light` | Green Means Go | tap | tap only while green, N times | ✅ v0.3.8 |
-| `copy_cat` | Copy Cat | tap (2-btn) | repeat the L/R sequence | ✅ v0.3.8 |
-| `whack` | Whack-a-Prop | tap | tap the hopping target N times | ✅ v0.3.8 |
-| `perfect_stop` | Perfect Stop | tap | tap to stop the marker in the zone | ✅ v0.3.8 |
-| `hold_still` | Hold Still | hold | hold until the bar fills | ✅ v0.3.8 |
-| `let_go` | Let Go Now | hold | release while the bar is in the zone | ✅ v0.3.8 |
-| `twitchy` | Twitchy | hold | hold, but release on every flash | ✅ v0.3.8 |
-| `deep_breath` | Deep Breath | hold | hold on IN, release on OUT (rhythm) | ✅ v0.3.8 |
-| `keep_center` | Keep Centered | drag | keep the dot in the zone vs drift | ✅ v0.3.8 |
-| `shadow` | Shadow | drag | keep the dot on the moving target | ✅ v0.3.8 |
-| `hot_zone` | Hot Zone | drag | keep the dot in the jumping zone | ✅ v0.3.8 |
-| `tightrope` | Tightrope | drag | keep the dot dead-centre (tiny zone) | ✅ v0.3.8 |
+**Action — tap** (`mash_meter`, `tap_count`, `beat_tap`, `green_light`,
+`copy_cat`, `whack`, `perfect_stop`, `bullseye`, `metronome`, `reflex`).
+**Action — hold** (`hold_still`, `let_go`, `twitchy`, `deep_breath`,
+`charge_up`, `pulse_hold`).
+**Action — drag** (`keep_center`, `shadow`, `hot_zone`, `tightrope`,
+`trace_wave`, `hot_cold`).
+**Word / quiz — choice** (`odd_one_out`, `category_tap`, `real_word`,
+`rhyme_time`, `opposite`, `spell_check`, `unscramble`, `missing_letter`,
+`first_letter`, `count_letters`, `count_vowels`, `longer_word`, `double_letter`,
+`emoji_match`, `stroop`, `math_add`, `math_sub`, `true_math`, `which_bigger`,
+`which_smaller`, `odd_number`, `word_recall` memory, `simon_say` sequence).
+
+The 15 action games shipped in v0.3.8; the 30 word/quiz + extra action games in
+v0.3.10.
 
 ## Practice mode
 
