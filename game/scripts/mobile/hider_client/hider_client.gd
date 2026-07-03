@@ -73,6 +73,10 @@ var mg_holding := false
 var mg_drag_x := 0.0
 var mg_tap_pending := 0
 var mg_result_sent := false
+var practice_mode := false
+var practice_index := 0
+var practice_next_in := 0.0
+var practice_exit_button: Button
 var discovered_games: Array = []
 var selected_game_index := -1
 var cam_yaw := 0.6
@@ -162,6 +166,10 @@ func _process(delta: float) -> void:
 	_animate_world(delta)
 	if mg_running:
 		_minigame_process(delta)
+	elif practice_mode and practice_next_in > 0.0:
+		practice_next_in -= delta
+		if practice_next_in <= 0.0:
+			_practice_next()
 	if minigame_flash_time > 0.0:
 		minigame_flash_time -= delta
 		if minigame_flash_time <= 0.0 and minigame_flash_label != null:
@@ -798,6 +806,11 @@ func _build_menu() -> void:
 	join_button.pressed.connect(_on_join_pressed)
 	right.add_child(join_button)
 
+	var practice_button := _make_button("PRACTICE MINIGAMES", 20, false)
+	practice_button.custom_minimum_size = Vector2(0, 48)
+	practice_button.pressed.connect(_start_practice)
+	right.add_child(practice_button)
+
 	manual_toggle = _make_button("Manual join...", 16, false)
 	manual_toggle.custom_minimum_size = Vector2(0, 36)
 	right.add_child(manual_toggle)
@@ -1031,6 +1044,17 @@ func _build_minigame_ui() -> void:
 	mg_button_b.button_down.connect(_on_mg_b_down)
 	minigame_panel.add_child(mg_button_b)
 
+	practice_exit_button = Button.new()
+	practice_exit_button.name = "PracticeExit"
+	practice_exit_button.text = "EXIT"
+	practice_exit_button.add_theme_font_size_override("font_size", 22)
+	practice_exit_button.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	practice_exit_button.position = Vector2(16, 8)
+	practice_exit_button.size = Vector2(128, 54)
+	practice_exit_button.visible = false
+	practice_exit_button.pressed.connect(_exit_practice)
+	minigame_panel.add_child(practice_exit_button)
+
 	minigame_flash_label = Label.new()
 	minigame_flash_label.name = "MgFlash"
 	minigame_flash_label.set_anchors_preset(Control.PRESET_CENTER)
@@ -1074,6 +1098,8 @@ func _minigame_start(minigame_id: String, difficulty: int) -> void:
 	mg_instructions_label.text = String(mg_params.get("instructions", ""))
 	mg_countdown_label.text = "GET READY"
 	mg_countdown_label.visible = true
+	# Cover the whole screen in practice; leave the status bar visible in a round.
+	minigame_panel.offset_top = 0.0 if practice_mode else 58.0
 	minigame_panel.visible = true
 	_mg_configure_widgets()
 	_mg_layout()
@@ -1094,6 +1120,16 @@ func _minigame_finish(passed: bool) -> void:
 	if mg_result_sent:
 		return
 	mg_result_sent = true
+	mg_running = false
+	if mg_button_a != null:
+		mg_button_a.visible = false
+	if mg_button_b != null:
+		mg_button_b.visible = false
+	if practice_mode:
+		# Practice: no host to tell; just show the result and queue the next game.
+		_flash_minigame("NICE - HELD STILL!" if passed else "CAUGHT! TRY AGAIN", DANGER_COLORS["safe"] if passed else DANGER_COLORS["critical"])
+		practice_next_in = 1.6
+		return
 	if joined and client != null and client.is_connected_to_host():
 		client.send_message({
 			"type": "minigame_result",
@@ -1107,6 +1143,40 @@ func _minigame_finish(passed: bool) -> void:
 		_flash_minigame("CAUGHT! DROPPED", DANGER_COLORS["critical"])
 	mg_awaiting_clear = true
 	_minigame_teardown()
+
+
+# Practice mode: play every minigame back-to-back, no host needed, from the
+# startup screen. Handy for learning the games and for tuning.
+func _start_practice() -> void:
+	practice_mode = true
+	practice_index = -1
+	if menu_panel != null:
+		menu_panel.visible = false
+	if game_panel != null:
+		game_panel.visible = true
+	if practice_exit_button != null:
+		practice_exit_button.visible = true
+	_practice_next()
+
+
+func _practice_next() -> void:
+	if not practice_mode:
+		return
+	var all_ids: Array = MinigamesScript.ids()
+	practice_index = (practice_index + 1) % all_ids.size()
+	# Difficulty creeps up as you get further into the set.
+	_minigame_start(String(all_ids[practice_index]), practice_index / 5)
+	if practice_exit_button != null:
+		practice_exit_button.visible = true
+
+
+func _exit_practice() -> void:
+	practice_mode = false
+	practice_next_in = 0.0
+	if practice_exit_button != null:
+		practice_exit_button.visible = false
+	_minigame_teardown()
+	_show_menu()
 
 
 func _minigame_process(delta: float) -> void:
@@ -1622,6 +1692,8 @@ func _update_status() -> void:
 # Detects when an inspection begins (the seeker grabbed us) and launches the
 # local minigame; re-arms once the host clears the inspection.
 func _update_minigame() -> void:
+	if practice_mode:
+		return
 	var mg: Dictionary = hider_state.get("inspection", {})
 	var active := joined and not mg.is_empty() and String(mg.get("status", "")) == "active"
 	if active and not mg_running and not mg_awaiting_clear:

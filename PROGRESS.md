@@ -919,9 +919,16 @@ User reported the v0.3.7 minigame felt dead ("pressing didn't do anything") and 
 - Tests: sim covers start/pass/fail/deadline/decoy-inert/difficulty-ramp and the 15-count; the mobile smoke test loops over all 15 and asserts each runs to completion with no runtime error and no hang. Full `make test` green (**332 PASS, 0 FAIL**). Bumped to 0.3.8 / versionCode 17 (export_presets.cfg ×2 + validate_android_config.py).
 - Note: the phone-side minigame *feel* (button sizing, difficulty, readability) is smoke-covered only, not device-tested here — needs an on-phone play pass.
 
+## 2026-07-03 Follow-up: Practice minigames button (v0.3.9)
+
+- Added a **PRACTICE MINIGAMES** button to the mobile startup/menu screen (`_build_menu`). It plays every minigame back-to-back locally with no host/join (`_start_practice` → `_practice_next` cycles `MinigamesScript.ids()`, difficulty creeps up), with an EXIT button back to the menu. Reuses the local minigame engine; `_update_minigame` (network lifecycle) is guarded off during `practice_mode`, and `_minigame_finish` skips the network report and queues the next game after a short flash. Mobile smoke test covers start → run-to-completion → auto-advance → exit. Bumped to 0.3.9 / versionCode 18.
+- Verified `make test` on a fresh `.godot` cache (the CI clean-checkout condition).
+- Quest install conflict diagnosed for the user: the on-device smoke builds are **debug-signed** (`CN=Android Debug`) while the GitHub release is **upload-key signed**, so installing the release over the debug build fails with a signature/package conflict; a full uninstall of `com.mjcipriano.hidefall.quest` (SideQuest/Settings/adb, not just "remove from library") is required. TODO: sign local smoke builds with the upload key so device installs always match the release.
+
 ## Next
 
-1. Install the mobile APK on the phone and actually play the minigames when picked up: confirm pressing/holding/dragging responds instantly, instructions show first, and difficulty feels fair as it ramps.
+1. Uninstall the debug-signed `com.mjcipriano.hidefall.quest` from the Quest (SideQuest or adb) so the upload-signed release installs; consider signing local builds with the upload key to prevent recurrence.
+2. Install the mobile APK on the phone: try PRACTICE MINIGAMES from the menu, and get picked up in a real round — confirm pressing/holding/dragging responds instantly, instructions show first, difficulty ramps fairly.
 2. Complete `v0.3.6` release: commit, tag, push, GitHub Actions release, released-asset checksum/artifact verification, and released Quest smoke.
 2. Install the latest mobile APK on the Android phone and verify in a real round: fullscreen, snappy joystick, Dash, Mimic, Quake, Ping, and the endless-hiders respawn flash.
 3. In headset, feel-check the final 24cm x 26cm paged settings menu and status panel text fit during a real round.

@@ -73,6 +73,14 @@ Set `hiders.inspection_minigame` in `default.json` to a single id to force it
 | `hot_zone` | Hot Zone | drag | keep the dot in the jumping zone | ✅ v0.3.8 |
 | `tightrope` | Tightrope | drag | keep the dot dead-centre (tiny zone) | ✅ v0.3.8 |
 
+## Practice mode
+
+The mobile startup screen has a **PRACTICE MINIGAMES** button that plays every
+minigame back-to-back locally (no host/join needed) with an EXIT button — good
+for learning the games and for tuning. It reuses the same engine
+(`_start_practice` → `_practice_next` cycles `MinigamesScript.ids()`), so a new
+minigame automatically shows up in practice too.
+
 ## Backlog ideas
 
 - Accelerometer "don't move the phone" game (needs device motion input).

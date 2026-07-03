@@ -1197,6 +1197,21 @@ func _test_mobile_scene_smoke() -> void:
 				break
 			scene._minigame_process(0.1)
 		_assert(resolved, "inspection minigame '%s' runs to completion without hanging" % minigame_id)
+	# Practice mode: cycle minigames locally from the menu with no host.
+	scene._start_practice()
+	_assert(scene.practice_mode and scene.mg_running, "practice mode starts a minigame with no host")
+	for _f in 300:
+		if not scene.mg_running:
+			break
+		scene._minigame_process(0.1)
+	_assert(not scene.mg_running and scene.practice_next_in > 0.0, "finishing a practice game queues the next one")
+	for _f in 40:
+		scene._process(0.1)
+		if scene.mg_running:
+			break
+	_assert(scene.mg_running, "practice auto-advances to the next minigame")
+	scene._exit_practice()
+	_assert(not scene.practice_mode and scene.menu_panel.visible, "exiting practice returns to the menu")
 	root.remove_child(scene)
 	scene.free()
 	await process_frame
