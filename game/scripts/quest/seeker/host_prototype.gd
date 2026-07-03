@@ -35,6 +35,8 @@ var grip_was_pressed := false
 var scan_was_pressed := false
 var menu_toggle_was_pressed := false
 var settings_menu_pointer_hovered := false
+var menu_pointer_beam: MeshInstance3D
+var menu_pointer_beam_material: StandardMaterial3D
 var last_scan_text := "scan ready"
 var launch_gameplay_logged := false
 var held_prev_position := Vector3.ZERO
@@ -498,9 +500,17 @@ func _update_hand_menu() -> void:
 		gun_text = "EMPTY"
 	elif simulation.shot_cooldown_remaining > 0.0:
 		gun_text = "wait %.1f" % simulation.shot_cooldown_remaining
-	xr_hand_menu_label.text = "%s\nTime %.0f  Shots %d (%s)\nScans %d  Props %d  Live %d\nPhones join over Wi-Fi\nRoom %s  %s" % [
+	# During an untimed hunt the round has no clock, so show elapsed hunt time
+	# counting up instead of a countdown that would look like a game-over timer.
+	var timer_on := bool(config.get_value("round", "end_on_seek_timeout", false))
+	var time_text: String
+	if simulation.phase == HidefallSimulationScript.PHASE_SEEK and not timer_on:
+		time_text = "Hunt %.0f" % simulation.phase_elapsed
+	else:
+		time_text = "Time %.0f" % float(simulation.get_state_snapshot(local_hider_id)["time_remaining"])
+	xr_hand_menu_label.text = "%s\n%s  Shots %d (%s)\nScans %d  Props %d  Live %d\nPhones join over Wi-Fi\nRoom %s  %s" % [
 		_phase_short_text(),
-		float(simulation.get_state_snapshot(local_hider_id)["time_remaining"]),
+		time_text,
 		simulation.shots_remaining,
 		gun_text,
 		simulation.scan_pulses_remaining,
@@ -518,8 +528,6 @@ func _phase_short_text() -> String:
 			return "LOBBY - A starts"
 		HidefallSimulationScript.PHASE_ROOM_SETUP:
 			return "SETUP - A to confirm"
-		HidefallSimulationScript.PHASE_OBJECT_RAIN:
-			return "PROPS FALLING"
 		HidefallSimulationScript.PHASE_SEEK:
 			return "HUNT - misses cost ammo"
 		HidefallSimulationScript.PHASE_RESULTS:
@@ -606,10 +614,7 @@ func _grab_source() -> Node3D:
 
 
 func _can_grab_phase() -> bool:
-	match simulation.phase:
-		HidefallSimulationScript.PHASE_OBJECT_RAIN, HidefallSimulationScript.PHASE_SEEK:
-			return true
-	return false
+	return simulation.phase == HidefallSimulationScript.PHASE_SEEK
 
 
 func _begin_grab() -> void:
@@ -708,9 +713,60 @@ func _update_xr_pointer_dot() -> void:
 func _update_settings_menu_pointer() -> void:
 	if settings_menu == null or not _is_settings_menu_open():
 		settings_menu_pointer_hovered = false
+		_set_menu_laser_visible(false)
 		return
 	var ray := _get_seeker_ray()
 	settings_menu_pointer_hovered = settings_menu.update_pointer(ray["origin"], ray["direction"])
+	var from: Vector3 = ray["origin"]
+	var to: Vector3
+	if settings_menu.is_pointer_active():
+		to = settings_menu.get_pointer_world_point()
+	else:
+		to = from + ray["direction"] * 1.2
+	_update_menu_laser(from, to, settings_menu_pointer_hovered)
+
+
+# Persistent aim laser shown while the wrist menu is open, so the seeker can see
+# where they are pointing. Green when a row is under the dot, amber otherwise.
+func _update_menu_laser(from: Vector3, to: Vector3, hovering: bool) -> void:
+	if menu_pointer_beam == null:
+		menu_pointer_beam = MeshInstance3D.new()
+		menu_pointer_beam.name = "MenuPointerBeam"
+		var mesh := CylinderMesh.new()
+		mesh.top_radius = 0.0025
+		mesh.bottom_radius = 0.0025
+		mesh.height = 1.0
+		mesh.radial_segments = 6
+		menu_pointer_beam.mesh = mesh
+		menu_pointer_beam_material = StandardMaterial3D.new()
+		menu_pointer_beam_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		menu_pointer_beam_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		menu_pointer_beam_material.emission_enabled = true
+		menu_pointer_beam_material.no_depth_test = true
+		menu_pointer_beam.material_override = menu_pointer_beam_material
+		add_child(menu_pointer_beam)
+	var length := from.distance_to(to)
+	if length < 0.02:
+		menu_pointer_beam.visible = false
+		return
+	var color := Color(0.3, 1.0, 0.5, 0.85) if hovering else Color(1.0, 0.8, 0.3, 0.7)
+	menu_pointer_beam_material.albedo_color = color
+	menu_pointer_beam_material.emission = color
+	menu_pointer_beam_material.emission_energy_multiplier = 3.0 if hovering else 1.6
+	menu_pointer_beam.mesh.height = length
+	var axis_y := (to - from).normalized()
+	var axis_x := axis_y.cross(Vector3.UP)
+	if axis_x.length() < 0.001:
+		axis_x = axis_y.cross(Vector3.RIGHT)
+	axis_x = axis_x.normalized()
+	var axis_z := axis_x.cross(axis_y).normalized()
+	menu_pointer_beam.global_transform = Transform3D(Basis(axis_x, axis_y, axis_z), (from + to) * 0.5)
+	menu_pointer_beam.visible = true
+
+
+func _set_menu_laser_visible(is_visible: bool) -> void:
+	if menu_pointer_beam != null:
+		menu_pointer_beam.visible = is_visible
 
 
 func _get_seeker_ray() -> Dictionary:
@@ -945,10 +1001,8 @@ func _phase_instruction_text() -> String:
 			return "READY - press A/R to start"
 		HidefallSimulationScript.PHASE_ROOM_SETUP:
 			return "SETUP - press A to confirm your play space"
-		HidefallSimulationScript.PHASE_OBJECT_RAIN:
-			return "PROPS FALLING - hiders are dropping in too"
 		HidefallSimulationScript.PHASE_SEEK:
-			return "HUNT - find the live props, misses cost ammo"
+			return "HUNT - props rain in, find the live ones, misses cost ammo"
 		HidefallSimulationScript.PHASE_RESULTS:
 			return "ROUND OVER - press A/R to play again"
 	return "HIDEFALL"
@@ -996,7 +1050,7 @@ func _flash_crosshair(color: Color) -> void:
 
 
 func _setup_audio() -> void:
-	for key in ["shoot", "pickup", "drop", "hit", "miss", "empty", "respawn", "earthquake"]:
+	for key in ["shoot", "pickup", "drop", "hit", "miss", "empty", "respawn", "earthquake", "tick", "tick_final", "round_over", "surprised", "inspect_pass"]:
 		var player := AudioStreamPlayer.new()
 		player.name = "Sfx_" + key
 		player.stream = _make_sfx(key)
@@ -1022,6 +1076,25 @@ func _process_simulation_events() -> void:
 				_play_sfx("respawn")
 			"hider_ping":
 				_play_spatial_ping(event)
+			"countdown_tick":
+				_play_sfx("tick_final" if bool(event.get("final", false)) else "tick")
+			"round_over":
+				_play_sfx("round_over")
+			"inspection_failed":
+				_on_inspection_failed(event)
+			"inspection_passed":
+				_play_sfx("inspect_pass")
+
+
+# A held hider flunked its stay-still minigame: the sim already popped it out of
+# our hand, so forget the grab and react with a surprised yelp + flash.
+func _on_inspection_failed(event: Dictionary) -> void:
+	var object_id := String(event.get("object_id", ""))
+	if object_id == held_object_id:
+		held_object_id = ""
+		has_prev_held_pos = false
+	_play_sfx("surprised")
+	_flash_crosshair(Color(1.0, 0.5, 0.2, 1.0))
 
 
 # The taunt plays from the hider's prop so the seeker can hunt by ear; each
@@ -1112,6 +1185,16 @@ func _make_sfx(kind: String) -> AudioStreamWAV:
 			duration = 0.42
 		"earthquake":
 			duration = 1.3
+		"tick":
+			duration = 0.07
+		"tick_final":
+			duration = 0.11
+		"round_over":
+			duration = 0.9
+		"surprised":
+			duration = 0.34
+		"inspect_pass":
+			duration = 0.3
 	var sample_count := int(mix_rate * duration)
 	var data := PackedByteArray()
 	data.resize(sample_count * 2)
@@ -1172,6 +1255,33 @@ func _make_sfx(kind: String) -> AudioStreamWAV:
 				sample = rumble * 1.3 + 0.6 * sin(TAU * 42.0 * t + 2.0 * sin(TAU * 5.5 * t))
 				sample *= 0.75 + 0.25 * sin(TAU * 6.0 * t)
 				envelope = minf(progress * 6.0, 1.0) * pow(1.0 - progress, 0.9)
+			"tick":
+				# Dry wood-block clock tick for the routine countdown seconds.
+				sample = sin(TAU * 1200.0 * t) + 0.4 * (randf() * 2.0 - 1.0)
+				envelope = pow(1.0 - progress, 8.0)
+			"tick_final":
+				# Higher, sharper tick for the last few urgent seconds.
+				sample = sin(TAU * 1650.0 * t) + 0.5 * sin(TAU * 3300.0 * t) + 0.3 * (randf() * 2.0 - 1.0)
+				envelope = pow(1.0 - progress, 6.0)
+			"round_over":
+				# Resolving three-note fanfare to mark the end of the round.
+				var chord := [523.0, 659.0, 784.0]
+				var slot := mini(int(progress * 3.0), 2)
+				var note_progress := fmod(progress * 3.0, 1.0)
+				var frequency: float = chord[slot]
+				sample = sin(TAU * frequency * t) + 0.4 * sin(TAU * frequency * 2.0 * t) + 0.2 * sin(TAU * frequency * 3.0 * t)
+				envelope = sin(PI * note_progress) * (0.85 - 0.2 * progress)
+			"surprised":
+				# Comedic upward "yipe!" slide when a hider is caught fidgeting.
+				var yelp := 320.0 * pow(3.2, progress)
+				sample = sin(TAU * yelp * t) + 0.3 * sin(TAU * yelp * 2.0 * t)
+				sample += 0.15 * (randf() * 2.0 - 1.0) * pow(1.0 - progress, 2.0)
+				envelope = sin(PI * clampf(progress * 1.1, 0.0, 1.0)) * 0.9
+			"inspect_pass":
+				# Soft two-note "all clear" when a hider holds still successfully.
+				var pass_note := 587.0 if progress < 0.5 else 880.0
+				sample = sin(TAU * pass_note * t) + 0.3 * sin(TAU * pass_note * 2.0 * t)
+				envelope = sin(PI * fmod(progress * 2.0, 1.0)) * 0.7
 		var value := int(clampf(sample * envelope * 0.6, -1.0, 1.0) * 32767.0)
 		data.encode_s16(i * 2, value)
 	return _wrap_wav(data, mix_rate)

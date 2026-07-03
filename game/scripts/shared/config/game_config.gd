@@ -70,9 +70,9 @@ func _deep_merge(target: Dictionary, overrides: Dictionary) -> void:
 func _apply_defaults() -> void:
 	if data.is_empty():
 		data = {
-			"round": {"room_setup_seconds": 5, "object_rain_seconds": 10, "seek_seconds": 90, "results_seconds": 15, "end_on_seek_timeout": false, "end_when_out_of_shots": true},
+			"round": {"room_setup_seconds": 5, "seek_seconds": 90, "results_seconds": 15, "countdown_tick_seconds": 15, "end_on_seek_timeout": false, "end_when_out_of_shots": true},
 			"objects": {"decoy_count": 75, "max_decoy_count": 150, "spawn_height_meters": 2.5},
 			"seeker": {"base_bullets": 3, "bullets_per_hider": 1, "scan_pulse_enabled": true, "scan_pulse_count": 1, "consume_shot_on_hit": false},
-			"hiders": {"shape_change_cooldown": 12, "color_change_cooldown": 6, "movement_speed": 1.0, "bot_decision_seconds": 1.6, "bot_count": 2, "dash_enabled": true, "dash_speed": 7.0, "dash_duration_seconds": 0.28, "dash_cooldown_seconds": 3.5, "mimic_radius_meters": 0.75, "mimic_cooldown_seconds": 5.0},
+			"hiders": {"shape_change_cooldown": 0, "color_change_cooldown": 0, "movement_speed": 1.0, "bot_decision_seconds": 1.6, "bot_count": 2, "dash_enabled": true, "dash_speed": 7.0, "dash_duration_seconds": 0.28, "dash_cooldown_seconds": 3.5, "mimic_radius_meters": 0.75, "mimic_cooldown_seconds": 0.0, "inspection_minigame_enabled": true, "inspection_minigame": "steady_balance"},
 			"network": {"max_hiders": 8, "allow_late_join": false, "transport": "websocket_lan", "protocol_version": 1}
 		}

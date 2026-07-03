@@ -49,6 +49,14 @@ var selected_pattern_index := 0
 var pending_shape: Variant = null
 var pending_color: Variant = null
 var pending_ability: Variant = null
+# Inspection minigame (played while the seeker is holding this hider).
+var minigame_push := 0.0
+var current_inspection: Dictionary = {}
+var minigame_panel: Control
+var minigame_flash_label: Label
+var minigame_touch_index := -1
+var minigame_flash_time := 0.0
+var _mg_was_pending := false
 var discovered_games: Array = []
 var selected_game_index := -1
 var cam_yaw := 0.6
@@ -136,6 +144,10 @@ func _process(delta: float) -> void:
 			client.send_message(build_hider_input())
 	_animate_preview(delta)
 	_animate_world(delta)
+	if minigame_flash_time > 0.0:
+		minigame_flash_time -= delta
+		if minigame_flash_time <= 0.0 and minigame_flash_label != null:
+			minigame_flash_label.visible = false
 
 
 func _exit_tree() -> void:
@@ -170,6 +182,7 @@ func build_hider_input() -> Dictionary:
 		"request_shape": pending_shape,
 		"request_color": pending_color,
 		"ability": pending_ability,
+		"minigame_input": minigame_push,
 		"client_time": Time.get_ticks_msec() / 1000.0
 	}
 	pending_shape = null
@@ -882,6 +895,30 @@ func _build_game_ui() -> void:
 	leave_button.pressed.connect(_on_leave_pressed)
 	bar_row.add_child(leave_button)
 
+	# Inspection minigame overlay: a wide "balance" bar the player drags to keep
+	# the marker in the safe zone while the seeker holds them. Covers the middle
+	# of the screen so it's front-and-center and easy to reach with either thumb.
+	minigame_panel = Control.new()
+	minigame_panel.name = "MinigamePanel"
+	minigame_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	minigame_panel.offset_top = 90.0
+	minigame_panel.offset_bottom = -330.0
+	minigame_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	minigame_panel.visible = false
+	minigame_panel.draw.connect(_draw_minigame)
+	minigame_panel.gui_input.connect(_on_minigame_input)
+	game_panel.add_child(minigame_panel)
+
+	minigame_flash_label = Label.new()
+	minigame_flash_label.name = "MinigameFlash"
+	minigame_flash_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	minigame_flash_label.offset_top = 150.0
+	minigame_flash_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	minigame_flash_label.add_theme_font_size_override("font_size", 40)
+	minigame_flash_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	minigame_flash_label.visible = false
+	game_panel.add_child(minigame_flash_label)
+
 	joystick_area = Control.new()
 	joystick_area.name = "Joystick"
 	joystick_area.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
@@ -959,6 +996,68 @@ func _draw_joystick() -> void:
 	joystick_area.draw_arc(center, base_radius, 0.0, TAU, 48, Color(0.65, 0.78, 0.9, 0.55), 3.0)
 	var knob := center + move_vector * (base_radius - 26.0)
 	joystick_area.draw_circle(knob, 30.0, Color(ACCENT.r, ACCENT.g, ACCENT.b, 0.85))
+
+
+# Renders the "Steady Hands" balance minigame: a track with a green safe zone,
+# a marker driven by the authoritative host state, and a fill bar for time left.
+# Extend with a new branch (keyed by current_inspection.minigame) for new games.
+func _draw_minigame() -> void:
+	if minigame_panel == null or current_inspection.is_empty():
+		return
+	var size := minigame_panel.size
+	minigame_panel.draw_rect(Rect2(Vector2(20, size.y * 0.2), Vector2(size.x - 40, size.y * 0.6)), Color(0.05, 0.07, 0.12, 0.92), true)
+	var minigame_id := String(current_inspection.get("minigame", ""))
+	if minigame_id == "steady_balance":
+		var margin := 60.0
+		var track_y := size.y * 0.5
+		var left := margin
+		var right := size.x - margin
+		var span := right - left
+		var mid := (left + right) * 0.5
+		var zone := clampf(float(current_inspection.get("zone", 0.5)), 0.05, 1.0)
+		var ball := clampf(float(current_inspection.get("ball", 0.0)), -1.0, 1.0)
+		var in_zone := absf(ball) <= zone
+		# Track.
+		minigame_panel.draw_line(Vector2(left, track_y), Vector2(right, track_y), Color(0.4, 0.5, 0.65, 0.7), 6.0)
+		# Safe zone.
+		var zone_half := span * 0.5 * zone
+		minigame_panel.draw_rect(Rect2(Vector2(mid - zone_half, track_y - 34), Vector2(zone_half * 2.0, 68)), Color(0.25, 0.78, 0.42, 0.28), true)
+		# Marker.
+		var ball_x := mid + ball * span * 0.5
+		var ball_color := DANGER_COLORS["safe"] if in_zone else DANGER_COLORS["critical"]
+		minigame_panel.draw_circle(Vector2(ball_x, track_y), 26.0, ball_color)
+		# Time-left fill under the track.
+		var frac := clampf(float(current_inspection.get("time_left", 0.0)) / 6.0, 0.0, 1.0)
+		minigame_panel.draw_rect(Rect2(Vector2(left, track_y + 60), Vector2(span * frac, 12)), ACCENT, true)
+
+
+func _on_minigame_input(event: InputEvent) -> void:
+	if minigame_panel == null:
+		return
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			minigame_touch_index = event.index
+			_set_minigame_push_from_x(event.position.x)
+		elif event.index == minigame_touch_index:
+			minigame_touch_index = -1
+			minigame_push = 0.0
+	elif event is InputEventMouseButton:
+		minigame_touch_index = 0 if event.pressed else -1
+		if event.pressed:
+			_set_minigame_push_from_x(event.position.x)
+		else:
+			minigame_push = 0.0
+	elif event is InputEventScreenDrag or (event is InputEventMouseMotion and minigame_touch_index == 0):
+		_set_minigame_push_from_x(event.position.x)
+
+
+# Push is how far left/right of centre the thumb is: drag toward an edge to
+# nudge the marker that way and counter the drift.
+func _set_minigame_push_from_x(x: float) -> void:
+	if minigame_panel == null:
+		return
+	var mid := minigame_panel.size.x * 0.5
+	minigame_push = clampf((x - mid) / (minigame_panel.size.x * 0.35), -1.0, 1.0)
 
 
 # --- input ---------------------------------------------------------------------
@@ -1089,7 +1188,7 @@ func _update_status() -> void:
 	if ready_button != null:
 		ready_button.visible = current_phase == "lobby" and not spectator
 	if dash_button != null:
-		var in_round := current_phase == "object_rain" or current_phase == "seek"
+		var in_round := current_phase == "seek"
 		var quake_uses := int(hider_state.get("earthquake_uses", 0))
 		dash_button.disabled = not in_round or spectator or float(cooldowns.get("dash", 0.0)) > 0.05
 		mimic_button.disabled = not in_round or spectator or float(cooldowns.get("mimic", 0.0)) > 0.05
@@ -1119,6 +1218,37 @@ func _update_status() -> void:
 			overlay_label.visible = false
 	if game_status_label != null:
 		game_status_label.text = "%s   %s" % [connection_status, host_message]
+	_update_minigame()
+
+
+# Shows/hides the stay-still minigame overlay from the inspection state in the
+# latest snapshot, and flashes the outcome when it resolves.
+func _update_minigame() -> void:
+	var mg: Dictionary = hider_state.get("inspection", {})
+	var mg_pending := joined and not mg.is_empty() and String(mg.get("status", "")) == "pending"
+	if _mg_was_pending and not mg_pending:
+		if String(mg.get("status", "")) == "success":
+			_flash_minigame("STAYED STILL!", DANGER_COLORS.get("safe", Color(0.4, 1.0, 0.5)))
+		else:
+			_flash_minigame("WOBBLED - DROPPED!", DANGER_COLORS.get("critical", Color(1.0, 0.4, 0.4)))
+	_mg_was_pending = mg_pending
+	current_inspection = mg
+	if minigame_panel != null:
+		minigame_panel.visible = mg_pending
+		if mg_pending:
+			minigame_panel.queue_redraw()
+	if not mg_pending:
+		minigame_push = 0.0
+		minigame_touch_index = -1
+
+
+func _flash_minigame(text: String, color: Color) -> void:
+	if minigame_flash_label == null:
+		return
+	minigame_flash_label.text = text
+	minigame_flash_label.add_theme_color_override("font_color", color)
+	minigame_flash_label.visible = true
+	minigame_flash_time = 1.3
 
 
 func _phase_text() -> String:
@@ -1128,8 +1258,6 @@ func _phase_text() -> String:
 			return "LOBBY - ready up"
 		"room_setup":
 			return "SEEKER IS SETTING UP"
-		"object_rain":
-			return "DROPPING IN - GET READY %.0fs" % time_remaining
 		"seek":
 			# With the default no-timer mode the countdown parks at 0; hide it.
 			if time_remaining > 0.5:

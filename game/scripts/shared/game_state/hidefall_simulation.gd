@@ -3,10 +3,10 @@ extends RefCounted
 
 const NetworkMessageValidatorScript := preload("res://scripts/shared/networking/network_message_validator.gd")
 const ScoreCalculatorScript := preload("res://scripts/shared/scoring/score_calculator.gd")
+const MinigamesScript := preload("res://scripts/shared/game_state/minigames.gd")
 
 const PHASE_LOBBY := "lobby"
 const PHASE_ROOM_SETUP := "room_setup"
-const PHASE_OBJECT_RAIN := "object_rain"
 const PHASE_SEEK := "seek"
 const PHASE_RESULTS := "results"
 
@@ -20,6 +20,9 @@ var server_tick := 0
 var shots_remaining := 0
 var shot_cooldown_remaining := 0.0
 var scan_pulses_remaining := 0
+# Last whole-second value emitted as a countdown tick during the seek phase, so
+# each second only ticks once. -1 means no tick has fired this phase.
+var _last_tick_second := -1
 var room_id := "842913"
 var room_token := "hidefall"
 var seeker_position := Vector3.ZERO
@@ -207,14 +210,16 @@ func start_round() -> bool:
 	stats["scan_pulses_used"] = 0
 	stats["all_hiders_found"] = false
 	stats["time_bonus"] = 0.0
-	_set_phase(PHASE_ROOM_SETUP if float(config.get_value("round", "room_setup_seconds", 5.0)) > 0.0 else PHASE_OBJECT_RAIN)
+	# Props and hiders rain down from the ceiling and settle live during the
+	# hunt — there is no separate object-rain phase to wait through.
+	_set_phase(PHASE_ROOM_SETUP if float(config.get_value("round", "room_setup_seconds", 5.0)) > 0.0 else PHASE_SEEK)
 	return true
 
 
 func confirm_room_setup() -> bool:
 	if phase != PHASE_ROOM_SETUP:
 		return false
-	_set_phase(PHASE_OBJECT_RAIN)
+	_set_phase(PHASE_SEEK)
 	return true
 
 
@@ -233,18 +238,14 @@ func advance(delta: float) -> void:
 	match phase:
 		PHASE_ROOM_SETUP:
 			if phase_elapsed >= float(config.get_value("round", "room_setup_seconds", 5.0)):
-				_set_phase(PHASE_OBJECT_RAIN)
-		PHASE_OBJECT_RAIN:
-			_update_bot_inputs(delta)
-			_integrate_object_rain(delta)
-			# Everything (hiders included) falls from the sky, then the hunt
-			# starts immediately; there is no blackout stage.
-			if phase_elapsed >= float(config.get_value("round", "object_rain_seconds", 10.0)):
 				_set_phase(PHASE_SEEK)
 		PHASE_SEEK:
 			_update_bot_inputs(delta)
+			_update_inspections(delta)
 			_integrate_hider_motion(delta)
 			_integrate_free_decoys(delta)
+			if bool(config.get_value("round", "end_on_seek_timeout", false)):
+				_emit_countdown_ticks()
 			if _live_hider_count() == 0:
 				stats["all_hiders_found"] = true
 				stats["time_bonus"] = _time_remaining()
@@ -268,9 +269,16 @@ func apply_hider_input(player_id: String, input: Dictionary) -> bool:
 	if object_id.is_empty() or not objects.has(object_id):
 		return false
 	var obj: Dictionary = objects[object_id]
+	# Stay-still minigame steering is accepted even while held (that is the whole
+	# point of the inspection), before the normal can't-move-while-held gate.
+	if input.has("minigame_input"):
+		obj["minigame_push"] = clampf(float(input.get("minigame_input", 0.0)), -1.0, 1.0)
+		objects[object_id] = obj
 	if obj.get("held_by_seeker", false) and bool(config.get_value("hiders", "cannot_move_while_held", true)):
+		# Movement stays blocked while held; the minigame push above was still
+		# captured so the hider can play the stay-still minigame.
 		return false
-	if phase != PHASE_OBJECT_RAIN and phase != PHASE_SEEK:
+	if phase != PHASE_SEEK:
 		return false
 
 	var move := Vector2.ZERO
@@ -417,10 +425,79 @@ func set_object_held(object_id: String, held: bool) -> bool:
 	obj["held_by_seeker"] = held
 	if held:
 		obj["velocity"] = Vector3.ZERO
+		_start_inspection(object_id, obj)
 	elif obj.get("is_hider", false) and obj.get("alive", false):
+		obj.erase("inspection")
 		obj["inspected_survived"] = int(obj.get("inspected_survived", 0)) + 1
 	objects[object_id] = obj
 	return true
+
+
+# A picked-up live hider must pass a stay-still minigame; it gets harder each
+# time the same hider is re-inspected. Decoys are inert when grabbed.
+func _start_inspection(object_id: String, obj: Dictionary) -> void:
+	if not bool(config.get_value("hiders", "inspection_minigame_enabled", true)):
+		return
+	if not obj.get("is_hider", false) or not obj.get("alive", false):
+		return
+	var difficulty := int(obj.get("inspect_count", 0))
+	var minigame_id := String(config.get_value("hiders", "inspection_minigame", MinigamesScript.DEFAULT_MINIGAME))
+	if not MinigamesScript.exists(minigame_id):
+		minigame_id = MinigamesScript.DEFAULT_MINIGAME
+	obj["inspection"] = MinigamesScript.make_state(minigame_id, difficulty)
+	obj["inspect_count"] = difficulty + 1
+	obj["minigame_push"] = 0.0
+	events.append({
+		"type": "inspection_started",
+		"object_id": object_id,
+		"player_id": obj.get("owner_player_id", ""),
+		"minigame": minigame_id,
+		"difficulty": difficulty
+	})
+
+
+# Steps every in-progress inspection minigame. A pass keeps the prop calm and
+# held; a fail makes it burst out of the seeker's grip (see _fail_inspection).
+func _update_inspections(delta: float) -> void:
+	for object_id in objects:
+		var obj: Dictionary = objects[object_id]
+		if not obj.get("held_by_seeker", false) or not obj.has("inspection"):
+			continue
+		if not obj.get("is_hider", false) or not obj.get("alive", false):
+			continue
+		var state: Dictionary = obj["inspection"]
+		if String(state.get("status", "pending")) != "pending":
+			continue
+		state = MinigamesScript.step(state, float(obj.get("minigame_push", 0.0)), delta)
+		obj["inspection"] = state
+		objects[object_id] = obj
+		match String(state.get("status", "pending")):
+			"fail":
+				_fail_inspection(object_id, obj)
+			"success":
+				events.append({
+					"type": "inspection_passed",
+					"object_id": object_id,
+					"player_id": obj.get("owner_player_id", "")
+				})
+
+
+# The hider flunked the stay-still minigame: it shakes, yelps, and pops out of
+# the seeker's hand with a surprised jolt. Not eliminated — just revealed.
+func _fail_inspection(object_id: String, obj: Dictionary) -> void:
+	obj["held_by_seeker"] = false
+	obj.erase("inspection")
+	obj["minigame_push"] = 0.0
+	obj["velocity"] = Vector3(rng.randf_range(-1.4, 1.4), 2.6, rng.randf_range(-1.4, 1.4))
+	obj["spin_axis"] = Vector3(rng.randf_range(-1.0, 1.0), rng.randf_range(-0.5, 0.5), rng.randf_range(-1.0, 1.0)).normalized()
+	obj["spin_speed"] = 6.5
+	obj["close_calls"] = int(obj.get("close_calls", 0)) + 1
+	objects[object_id] = obj
+	events.append({
+		"type": "inspection_failed",
+		"object_id": object_id,
+		"player_id": obj.get("owner_player_id", "")
+	})
 
 
 func release_object(object_id: String, velocity: Vector3 = Vector3.ZERO) -> bool:
@@ -430,6 +507,7 @@ func release_object(object_id: String, velocity: Vector3 = Vector3.ZERO) -> bool
 	if not obj.get("held_by_seeker", false):
 		return false
 	obj["held_by_seeker"] = false
+	obj.erase("inspection")
 	obj["velocity"] = velocity.limit_length(8.0)
 	# Thrown props tumble end over end in flight instead of gliding frozen.
 	var planar_speed := Vector2(velocity.x, velocity.z).length()
@@ -633,7 +711,7 @@ func get_state_snapshot(for_player_id: String = "") -> Dictionary:
 		"server_tick": server_tick,
 			"phase": phase,
 			"mode": game_mode(),
-			"time_remaining": _time_remaining(),
+			"time_remaining": _display_time_remaining(),
 			"shots_remaining": shots_remaining,
 			"shot_cooldown_remaining": snappedf(shot_cooldown_remaining, 0.01),
 			"scan_pulses_remaining": scan_pulses_remaining,
@@ -672,7 +750,8 @@ func get_hider_state(player_id: String) -> Dictionary:
 		"held_by_seeker": obj.get("held_by_seeker", false),
 		"freeze": obj.get("freeze", false),
 		"earthquake_uses": int(obj.get("earthquake_uses", 0)),
-		"times_found": int(players[player_id].get("times_found", 0))
+		"times_found": int(players[player_id].get("times_found", 0)),
+		"inspection": MinigamesScript.snapshot(obj["inspection"]) if obj.has("inspection") else {}
 	}
 
 
@@ -845,26 +924,6 @@ func _update_bot_inputs(delta: float) -> void:
 			obj["bot_decision_time"] = float(config.get_value("hiders", "bot_decision_seconds", 1.6)) * rng.randf_range(0.7, 1.4)
 		else:
 			obj["bot_decision_time"] = decision_time
-		objects[object_id] = obj
-
-
-func _integrate_object_rain(delta: float) -> void:
-	for object_id in objects:
-		var obj: Dictionary = objects[object_id]
-		var velocity: Vector3 = obj["velocity"]
-		velocity.y -= 9.8 * delta
-		var position: Vector3 = obj["position"] + velocity * delta
-		if position.y <= 0.15:
-			position.y = 0.15
-			velocity.y = abs(velocity.y) * 0.22
-			velocity.x *= 0.92
-			velocity.z *= 0.92
-			obj["spin_speed"] = float(obj.get("spin_speed", 0.0)) * 0.5
-			_settle_orientation(obj, delta)
-		else:
-			_integrate_tumble(obj, delta)
-		obj["position"] = _clamp_to_play_area(position)
-		obj["velocity"] = velocity.limit_length(8.0)
 		objects[object_id] = obj
 
 
@@ -1080,6 +1139,23 @@ func _calculate_bullets() -> int:
 func _set_phase(new_phase: String) -> void:
 	phase = new_phase
 	phase_elapsed = 0.0
+	_last_tick_second = -1
+
+
+# During the final seconds of a timed hunt, queue one countdown_tick event per
+# whole second so the host can play a ticking clock (and a sharper final tick).
+# Only runs when end_on_seek_timeout is on; with the timer off there is no clock.
+func _emit_countdown_ticks() -> void:
+	var seek_seconds := float(config.get_value("round", "seek_seconds", 90.0))
+	var window := float(config.get_value("round", "countdown_tick_seconds", 15.0))
+	var remaining := seek_seconds - phase_elapsed
+	if remaining <= 0.0 or remaining > window:
+		return
+	var seconds_left := int(ceil(remaining))
+	if seconds_left == _last_tick_second:
+		return
+	_last_tick_second = seconds_left
+	events.append({"type": "countdown_tick", "seconds_left": seconds_left, "final": seconds_left <= 3})
 
 
 func _finish_round() -> void:
@@ -1100,6 +1176,8 @@ func _finish_round() -> void:
 			scores[player_id] = hider_score
 			if players.has(player_id):
 				players[player_id]["score"] = hider_score
+	# Let the host play a round-end cue; note whether the seeker cleared the room.
+	events.append({"type": "round_over", "all_hiders_found": bool(stats.get("all_hiders_found", false))})
 	_set_phase(PHASE_RESULTS)
 
 
@@ -1117,8 +1195,6 @@ func _time_remaining() -> float:
 	match phase:
 		PHASE_ROOM_SETUP:
 			duration = float(config.get_value("round", "room_setup_seconds", 5.0))
-		PHASE_OBJECT_RAIN:
-			duration = float(config.get_value("round", "object_rain_seconds", 10.0))
 		PHASE_SEEK:
 			duration = float(config.get_value("round", "seek_seconds", 90.0))
 		PHASE_RESULTS:
@@ -1126,6 +1202,16 @@ func _time_remaining() -> float:
 		_:
 			return 0.0
 	return max(0.0, duration - phase_elapsed)
+
+
+# What clients should show as the on-screen countdown. Identical to the raw
+# phase remaining, except the hunt shows no countdown when the seek timer is
+# off — there is no clock ending the round, so a shrinking "90..0" would be a
+# lie. Scoring still uses the raw _time_remaining() for its speed bonus.
+func _display_time_remaining() -> float:
+	if phase == PHASE_SEEK and not bool(config.get_value("round", "end_on_seek_timeout", false)):
+		return 0.0
+	return _time_remaining()
 
 
 func _collision_radius_for_shape(shape_id: String) -> float:

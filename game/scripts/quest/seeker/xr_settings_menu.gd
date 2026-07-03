@@ -24,6 +24,13 @@ var row_tracks: Array[MeshInstance3D] = []
 var row_knobs: Array[MeshInstance3D] = []
 var hovered_index := -1
 
+# Where the seeker's aim ray meets the panel, surfaced so the host can draw a
+# laser to it and the on-panel dot shows exactly where a press will land.
+var pointer_dot: MeshInstance3D
+var pointer_material: StandardMaterial3D
+var pointer_world_point := Vector3.ZERO
+var pointer_active := false
+
 var normal_material: StandardMaterial3D
 var hover_material: StandardMaterial3D
 var action_material: StandardMaterial3D
@@ -46,6 +53,7 @@ func set_open(open: bool) -> void:
 	visible = open
 	if not open:
 		_set_hovered(-1)
+		_set_pointer(Vector3.ZERO, false)
 
 
 func toggle() -> void:
@@ -98,18 +106,22 @@ func force_hover(index: int) -> void:
 func update_pointer(origin: Vector3, direction: Vector3) -> bool:
 	if not visible:
 		_set_hovered(-1)
+		_set_pointer(Vector3.ZERO, false)
 		return false
 	var local_origin := global_transform.affine_inverse() * origin
 	var local_direction := (global_transform.affine_inverse().basis * direction).normalized()
 	if absf(local_direction.z) < 0.0001:
 		_set_hovered(-1)
+		_set_pointer(Vector3.ZERO, false)
 		return false
 	var t := -local_origin.z / local_direction.z
 	if t < 0.0:
 		_set_hovered(-1)
+		_set_pointer(Vector3.ZERO, false)
 		return false
 	var point := local_origin + local_direction * t
 	var over_panel := absf(point.x) <= PANEL_WIDTH * 0.5 and absf(point.y) <= PANEL_HEIGHT * 0.5
+	_set_pointer(point, over_panel)
 	if not over_panel:
 		_set_hovered(-1)
 		return false
@@ -120,6 +132,29 @@ func update_pointer(origin: Vector3, direction: Vector3) -> bool:
 			return true
 	_set_hovered(-1)
 	return true
+
+
+# Positions the on-panel dot and caches the world-space hit point for the host
+# laser. A local point on the panel plane (z=0) is nudged slightly forward so
+# the dot renders in front of the row quads.
+func _set_pointer(local_point: Vector3, active: bool) -> void:
+	pointer_active = active
+	if pointer_dot != null:
+		pointer_dot.visible = active
+	if not active:
+		return
+	var surface := Vector3(local_point.x, local_point.y, 0.014)
+	if pointer_dot != null:
+		pointer_dot.position = surface
+	pointer_world_point = global_transform * surface
+
+
+func is_pointer_active() -> bool:
+	return pointer_active
+
+
+func get_pointer_world_point() -> Vector3:
+	return pointer_world_point
 
 
 func activate_hovered() -> bool:
@@ -181,13 +216,24 @@ func _rebuild_visuals() -> void:
 	panel.material_override = _make_panel_material(Color(0.01, 0.025, 0.04, 0.93))
 	add_child(panel)
 
+	# Bright dot that rides the aim ray across the panel so the seeker sees
+	# exactly where a press will land.
+	pointer_dot = MeshInstance3D.new()
+	pointer_dot.name = "PointerDot"
+	var dot_mesh := QuadMesh.new()
+	dot_mesh.size = Vector2(0.011, 0.011)
+	pointer_dot.mesh = dot_mesh
+	pointer_dot.material_override = pointer_material
+	pointer_dot.visible = false
+	add_child(pointer_dot)
+
 	var title := Label3D.new()
 	title.name = "Title"
 	title.text = "%s CONTROL" % _page_title(page_index)
-	title.font_size = 8
-	title.outline_size = 2
-	title.pixel_size = 0.00055
-	title.width = 370.0
+	title.font_size = 28
+	title.outline_size = 3
+	title.pixel_size = 0.00019
+	title.width = 1070.0
 	title.position = Vector3(-0.102, 0.108, 0.006)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	title.modulate = Color(0.25, 0.92, 1.0, 1.0)
@@ -196,10 +242,10 @@ func _rebuild_visuals() -> void:
 	var shortcut := Label3D.new()
 	shortcut.name = "ShortcutHint"
 	shortcut.text = "A START"
-	shortcut.font_size = 6
-	shortcut.outline_size = 2
-	shortcut.pixel_size = 0.00050
-	shortcut.width = 185.0
+	shortcut.font_size = 24
+	shortcut.outline_size = 3
+	shortcut.pixel_size = 0.00015
+	shortcut.width = 615.0
 	shortcut.position = Vector3(0.010, 0.107, 0.006)
 	shortcut.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	shortcut.modulate = Color(0.78, 0.90, 1.0, 1.0)
@@ -223,10 +269,10 @@ func _rebuild_visuals() -> void:
 
 		var label := Label3D.new()
 		label.name = "Row%dLabel" % index
-		label.font_size = 7
-		label.outline_size = 2
-		label.pixel_size = 0.00050
-		label.width = 300.0
+		label.font_size = 28
+		label.outline_size = 3
+		label.pixel_size = 0.000186
+		label.width = 806.0
 		label.position = Vector3(-0.097, y + 0.005, 0.01)
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -236,10 +282,10 @@ func _rebuild_visuals() -> void:
 
 		var value_label := Label3D.new()
 		value_label.name = "Row%dValue" % index
-		value_label.font_size = 6
-		value_label.outline_size = 2
-		value_label.pixel_size = 0.00050
-		value_label.width = 190.0
+		value_label.font_size = 24
+		value_label.outline_size = 3
+		value_label.pixel_size = 0.0001875
+		value_label.width = 507.0
 		value_label.position = Vector3(-0.006, y + 0.005, 0.011)
 		value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		value_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -386,8 +432,8 @@ func _rows_for_page(index: int) -> Array[Dictionary]:
 		return [
 			{"type": "setting", "label": "Props", "section": "objects", "key": "decoy_count", "values": [30, 50, 75, 100, 125], "style": "slider", "suffix": ""},
 			{"type": "setting", "label": "Bots", "section": "hiders", "key": "bot_count", "values": [0, 1, 2, 3, 4, 6], "style": "slider", "suffix": ""},
-			{"type": "setting", "label": "Shape", "section": "hiders", "key": "shape_change_cooldown", "values": [4, 8, 12, 18], "style": "slider", "suffix": "s"},
-			{"type": "setting", "label": "Color", "section": "hiders", "key": "color_change_cooldown", "values": [2, 4, 6, 10], "style": "slider", "suffix": "s"},
+			{"type": "setting", "label": "Shape", "section": "hiders", "key": "shape_change_cooldown", "values": [0, 4, 8, 12, 18], "style": "slider", "suffix": "s"},
+			{"type": "setting", "label": "Color", "section": "hiders", "key": "color_change_cooldown", "values": [0, 2, 4, 6, 10], "style": "slider", "suffix": "s"},
 			{"type": "action", "label": "< Round", "action": "previous_page"}
 		]
 	return [
@@ -414,6 +460,10 @@ func _make_materials() -> void:
 	knob_material = _make_panel_material(Color(0.72, 1.0, 1.0, 1.0))
 	toggle_off_material = _make_panel_material(Color(0.18, 0.20, 0.24, 0.98))
 	toggle_on_material = _make_panel_material(Color(0.0, 0.75, 0.62, 0.98))
+	pointer_material = _make_panel_material(Color(1.0, 0.95, 0.35, 1.0))
+	pointer_material.emission_enabled = true
+	pointer_material.emission = Color(1.0, 0.9, 0.3, 1.0)
+	pointer_material.emission_energy_multiplier = 3.0
 
 
 func _make_panel_material(color: Color) -> StandardMaterial3D:

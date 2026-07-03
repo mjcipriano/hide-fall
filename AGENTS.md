@@ -5,6 +5,7 @@ Follow `GAME_DESIGN.md` as the product source of truth.
 Rules:
 
 - Keep gameplay logic in shared scripts under `game/scripts/shared`.
+- Adding a hider inspection minigame? Follow `MINIGAMES.md` — rules go in the shared `minigames.gd`, and the doc's table tracks what's implemented.
 - Keep Quest/XR-specific code under `game/scripts/quest`.
 - Keep mobile/client UI code under `game/scripts/mobile`.
 - Keep all balance and content data-driven in `game/content`.

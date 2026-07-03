@@ -42,6 +42,8 @@ func _run() -> void:
 	_test_hider_input_and_cooldowns()
 	_test_shooting_and_results()
 	_test_timeout_results()
+	_test_round_audio_cues()
+	_test_hunt_countdown_display()
 	_test_disconnect_and_soak()
 	_test_object_collisions()
 	_test_dropped_object_gravity()
@@ -55,6 +57,7 @@ func _run() -> void:
 	_test_endless_hiders_mode()
 	_test_earthquake_and_ping()
 	_test_hider_dash_and_mimic()
+	_test_inspection_minigame()
 	_test_end_round()
 	_test_hider_preferences()
 	_test_prop_factory()
@@ -160,9 +163,21 @@ func _test_phase_transitions() -> void:
 	_assert(sim.start_round(), "ready players can start round")
 	_assert(sim.phase == HidefallSimulationScript.PHASE_ROOM_SETUP, "round starts in room setup")
 	_assert(sim.confirm_room_setup(), "room setup can be confirmed")
-	_assert(sim.phase == HidefallSimulationScript.PHASE_OBJECT_RAIN, "round starts in object rain")
-	_advance_for(sim, 10.2)
-	_assert(sim.phase == HidefallSimulationScript.PHASE_SEEK, "object rain transitions straight to seek (no blackout)")
+	_assert(sim.phase == HidefallSimulationScript.PHASE_SEEK, "confirming setup goes straight to the hunt (no object-rain phase)")
+	# Props and hiders spawn up in the air and rain down live during the hunt.
+	var airborne := false
+	for object_id in sim.objects:
+		if float(sim.objects[object_id]["position"].y) > 0.5:
+			airborne = true
+			break
+	_assert(airborne, "props start airborne and fall during the hunt")
+	_advance_for(sim, 5.0)
+	var settled := true
+	for object_id in sim.objects:
+		if float(sim.objects[object_id]["position"].y) > 0.5:
+			settled = false
+			break
+	_assert(settled, "props settle to the floor shortly after the hunt starts")
 
 
 func _test_hider_input_and_cooldowns() -> void:
@@ -185,9 +200,17 @@ func _test_hider_input_and_cooldowns() -> void:
 	_assert(new_position.distance_to(old_position) > 0.01, "hider input moves object")
 	_assert(sim.objects[object_id]["shape"] == "sphere", "shape change applies")
 	_assert(sim.objects[object_id]["color"] == "blue", "color change applies")
+	# Disguise changes have no cooldown by default: hiders can morph as fast as they want.
 	sim.apply_hider_input(player_id, {"move": [0, 0], "request_shape": "cone", "request_color": "red"})
-	_assert(sim.objects[object_id]["shape"] == "sphere", "shape cooldown blocks repeat change")
-	_assert(sim.objects[object_id]["color"] == "blue", "color cooldown blocks repeat change")
+	_assert(sim.objects[object_id]["shape"] == "cone", "shape change repeats immediately with no cooldown")
+	_assert(sim.objects[object_id]["color"] == "red", "color change repeats immediately with no cooldown")
+	# A configured cooldown still gates repeat changes for hosts who want the old pacing.
+	sim.config.set_value("hiders", "shape_change_cooldown", 12.0)
+	sim.config.set_value("hiders", "color_change_cooldown", 6.0)
+	sim.apply_hider_input(player_id, {"move": [0, 0], "request_shape": "cube", "request_color": "green"})
+	sim.apply_hider_input(player_id, {"move": [0, 0], "request_shape": "sphere", "request_color": "blue"})
+	_assert(sim.objects[object_id]["shape"] == "cube", "configured shape cooldown blocks repeat change")
+	_assert(sim.objects[object_id]["color"] == "green", "configured color cooldown blocks repeat change")
 	_assert(sim.set_object_held(object_id, true), "seeker can mark object held")
 	_assert(not sim.apply_hider_input(player_id, {"move": [1, 0]}), "held hider input is blocked")
 	_assert(sim.move_held_object(object_id, Vector3(0.2, 0.4, 0.2)), "held object can be moved by host")
@@ -230,6 +253,72 @@ func _test_timeout_results() -> void:
 	_assert(sim.phase == HidefallSimulationScript.PHASE_RESULTS, "seek timeout ends round when the timer setting is on")
 	var results := sim.get_results()
 	_assert(results["hiders"].values()[0] >= 1000, "surviving hider receives survival score")
+
+
+func _test_round_audio_cues() -> void:
+	# A timed hunt should tick once per second through the final window and emit a
+	# single round-over cue when it ends.
+	var sim = _new_sim(4242)
+	sim.add_hider("Ticker")
+	sim.config.set_value("round", "end_on_seek_timeout", true)
+	sim.config.set_value("round", "seek_seconds", 20.0)
+	sim.config.set_value("round", "countdown_tick_seconds", 15.0)
+	sim.start_round()
+	sim.confirm_room_setup()
+	var ticks := 0
+	var final_ticks := 0
+	var round_over := 0
+	var elapsed := 0.0
+	while elapsed < 45.0 and sim.phase != HidefallSimulationScript.PHASE_RESULTS:
+		sim.advance(0.1)
+		elapsed += 0.1
+		for event in sim.drain_events():
+			match String(event.get("type", "")):
+				"countdown_tick":
+					ticks += 1
+					if bool(event.get("final", false)):
+						final_ticks += 1
+				"round_over":
+					round_over += 1
+	_assert(sim.phase == HidefallSimulationScript.PHASE_RESULTS, "timed round reaches results")
+	_assert(ticks >= 13 and ticks <= 15, "countdown ticks fire once per second through the final 15s")
+	_assert(final_ticks == 3, "the last three seconds use the urgent final tick")
+	_assert(round_over == 1, "round end emits exactly one round-over cue")
+
+	# With the timer off (default), there is no clock, so no countdown ticks fire.
+	var quiet = _new_sim(4243)
+	quiet.add_hider("Quiet")
+	quiet.config.set_value("round", "seek_seconds", 20.0)
+	quiet.start_round()
+	quiet.confirm_room_setup()
+	var quiet_ticks := 0
+	for _step in 350:
+		quiet.advance(0.1)
+		for event in quiet.drain_events():
+			if String(event.get("type", "")) == "countdown_tick":
+				quiet_ticks += 1
+	_assert(quiet_ticks == 0, "no countdown ticks when the hunt timer is off")
+
+
+func _test_hunt_countdown_display() -> void:
+	# Timer off (default): the hunt shows no countdown, because no clock ends it.
+	var off = _new_sim(7001)
+	off.add_hider("NoClock")
+	off.start_round()
+	off.confirm_room_setup()
+	_advance_for(off, 16.0)
+	_assert(off.phase == HidefallSimulationScript.PHASE_SEEK, "reached the hunt with the timer off")
+	_assert(float(off.get_state_snapshot()["time_remaining"]) == 0.0, "no hunt countdown is shown when the timer is off")
+
+	# Timer on: the hunt shows a live, shrinking countdown.
+	var on = _new_sim(7002)
+	on.add_hider("Clock")
+	on.config.set_value("round", "end_on_seek_timeout", true)
+	on.start_round()
+	on.confirm_room_setup()
+	_advance_for(on, 16.0)
+	_assert(on.phase == HidefallSimulationScript.PHASE_SEEK, "reached the timed hunt with the timer on")
+	_assert(float(on.get_state_snapshot()["time_remaining"]) > 0.0, "the hunt shows a live countdown when the timer is on")
 
 
 func _test_shot_economy() -> void:
@@ -616,11 +705,70 @@ func _test_hider_dash_and_mimic() -> void:
 	var before_mimic: Dictionary = sim.objects[object_id]
 	before_mimic["mimic_cooldown"] = 0.0
 	sim.objects[object_id] = before_mimic
+	# Mimic is free by default; a configured cooldown still arms after use.
+	sim.config.set_value("hiders", "mimic_cooldown_seconds", 5.0)
 	_assert(sim.apply_hider_input(player_id, {"move": [0.0, 0.0], "ability": "mimic"}), "mimic hider input is accepted")
 	_assert(sim.objects[object_id]["shape"] == "duck", "mimic copies adjacent object shape")
 	_assert(sim.objects[object_id]["color"] == "purple", "mimic copies adjacent object color")
 	_assert(sim.objects[object_id]["pattern"] == "stripes", "mimic copies adjacent object pattern")
 	_assert(float(sim.get_hider_cooldowns(player_id).get("mimic", 0.0)) > 0.0, "mimic cooldown is exposed")
+
+
+func _test_inspection_minigame() -> void:
+	# Failing: a held hider that ignores the minigame drifts out and is dropped.
+	var sim = _new_sim(909)
+	var pid := sim.add_hider("Wobbler")
+	sim.start_round()
+	sim.confirm_room_setup()
+	_advance_for(sim, 3.0)
+	var oid: String = sim.players[pid]["object_id"]
+	_assert(sim.set_object_held(oid, true), "seeker can inspect (grab) a live hider")
+	_assert(not sim.objects[oid].get("inspection", {}).is_empty(), "grabbing a live hider starts an inspection minigame")
+	_assert(String(sim.get_hider_state(pid).get("inspection", {}).get("status", "")) == "pending", "snapshot exposes the pending minigame to the phone")
+	sim.drain_events()
+	var failed := false
+	var had_fail_event := false
+	for _i in 90:
+		sim.apply_hider_input(pid, {"move": [0, 0], "minigame_input": 0.0})
+		sim.advance(0.1)
+		for e in sim.drain_events():
+			if String(e.get("type", "")) == "inspection_failed":
+				had_fail_event = true
+		if not sim.objects[oid].get("held_by_seeker", true):
+			failed = true
+			break
+	_assert(failed, "ignoring the minigame drops the hider out of the seeker's hand")
+	_assert(had_fail_event, "a failed inspection emits a surprised-drop event")
+	_assert((sim.objects[oid]["velocity"] as Vector3).y > 0.5, "a flunked hider pops out with an upward jolt")
+
+	# Passing: steering the marker back to centre holds still and stays held.
+	var sim2 = _new_sim(910)
+	var pid2 := sim2.add_hider("Steady")
+	sim2.start_round()
+	sim2.confirm_room_setup()
+	_advance_for(sim2, 3.0)
+	var oid2: String = sim2.players[pid2]["object_id"]
+	sim2.set_object_held(oid2, true)
+	var passed := false
+	for _i in 140:
+		var ball := float(sim2.objects[oid2].get("inspection", {}).get("ball", 0.0))
+		sim2.apply_hider_input(pid2, {"move": [0, 0], "minigame_input": -signf(ball)})
+		sim2.advance(0.1)
+		if String(sim2.objects[oid2].get("inspection", {}).get("status", "")) == "success":
+			passed = true
+			break
+		if not sim2.objects[oid2].get("held_by_seeker", true):
+			break
+	_assert(passed, "steering the marker to centre passes the stay-still minigame")
+	_assert(sim2.objects[oid2].get("held_by_seeker", false), "passing keeps the hider held and calm, not dropped")
+
+	# Decoys are inert when grabbed - no minigame.
+	var decoy_id: String = sim2.get_decoy_object_ids()[0]
+	sim2.set_object_held(decoy_id, true)
+	_assert(sim2.objects[decoy_id].get("inspection", {}).is_empty(), "grabbing a decoy does not start a minigame")
+
+	# Re-inspecting the same hider ramps difficulty.
+	_assert(int(sim2.objects[oid2].get("inspect_count", 0)) >= 1, "inspection count rises so repeat inspections get harder")
 
 
 func _test_end_round() -> void:
@@ -719,6 +867,13 @@ func _test_xr_settings_menu() -> void:
 	_assert(menu.activate_hovered(), "XR settings menu activates hovered setting row")
 	_assert(changed.get("section", "") == "seeker" and changed.get("key", "") == "shot_cooldown_seconds", "XR settings menu emits setting change")
 	_assert(absf(float(config.get_value("seeker", "shot_cooldown_seconds", 0.0)) - 3.5) < 0.001, "XR settings menu cycles config value")
+	# Aim laser + on-panel dot so the seeker can see exactly where a press lands.
+	_assert(menu.is_pointer_active(), "menu aim point is active while pointing at a row")
+	_assert(menu.pointer_dot != null and menu.pointer_dot.visible, "menu shows the aim dot on the panel")
+	_assert(absf(menu.get_pointer_world_point().z - 0.014) < 0.001, "menu reports the aim point on the panel surface")
+	_assert(not menu.update_pointer(Vector3(3.0, 0.0, 1.0), Vector3(0.0, 0.0, -1.0)), "menu pointer misses when aimed off the panel")
+	_assert(not menu.is_pointer_active(), "menu aim point clears when aimed off the panel")
+	_assert(not menu.pointer_dot.visible, "menu hides the aim dot when aimed away")
 	menu.force_hover(6)
 	_assert(menu.activate_hovered(), "XR settings menu activates page navigation")
 	_assert(menu.get_current_page_title() == "ROOM", "XR settings menu navigates to room page")
@@ -806,7 +961,7 @@ func _test_host_scene_smoke() -> void:
 	_assert(scene.get_join_payload_text().to_utf8_buffer().size() <= 106, "host join payload fits QR capacity")
 	_assert(scene.qr_texture_rect.texture != null, "host scene creates join QR texture")
 	scene._activate_primary_action()
-	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_OBJECT_RAIN, "host scene primary action starts a visible solo round from lobby")
+	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_SEEK, "host scene primary action starts a visible solo round straight into the hunt")
 	_assert(scene.object_nodes.size() >= 75, "visible solo round creates prop nodes immediately")
 	_assert(scene.arena_hint != null and not scene.arena_hint.visible, "host hides the floating start prompt once a round starts")
 	_advance_for(scene.simulation, 20.4)
@@ -817,7 +972,7 @@ func _test_host_scene_smoke() -> void:
 	_assert(scene.object_nodes.has(shot_hider_id) and not scene.object_nodes[shot_hider_id].visible, "one-shot hider body disappears after being shot")
 	scene.simulation.end_round()
 	scene._activate_primary_action()
-	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_OBJECT_RAIN, "host scene primary action restarts from results")
+	_assert(scene.simulation.phase == HidefallSimulationScript.PHASE_SEEK, "host scene primary action restarts straight into the hunt")
 	scene.config.set_value("round", "mode", "endless_hiders")
 	scene.simulation.end_round()
 	scene._activate_primary_action()

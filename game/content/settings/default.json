@@ -2,9 +2,9 @@
   "round": {
     "mode": "one_shot",
     "room_setup_seconds": 5,
-    "object_rain_seconds": 10,
     "seek_seconds": 90,
     "results_seconds": 15,
+    "countdown_tick_seconds": 15,
     "end_on_seek_timeout": false,
     "end_when_out_of_shots": true
   },
@@ -26,21 +26,23 @@
     "scan_pulse_count": 1
   },
   "hiders": {
-    "shape_change_cooldown": 12,
-    "color_change_cooldown": 6,
+    "shape_change_cooldown": 0,
+    "color_change_cooldown": 0,
     "movement_speed": 1.0,
     "dash_enabled": true,
     "dash_speed": 7.0,
     "dash_duration_seconds": 0.28,
     "dash_cooldown_seconds": 3.5,
     "mimic_radius_meters": 0.75,
-    "mimic_cooldown_seconds": 5.0,
+    "mimic_cooldown_seconds": 0.0,
     "earthquake_enabled": true,
     "earthquake_uses": 1,
     "earthquake_power": 1.0,
     "ping_cooldown_seconds": 4.0,
     "abilities_enabled": false,
     "cannot_move_while_held": true,
+    "inspection_minigame_enabled": true,
+    "inspection_minigame": "steady_balance",
     "bot_decision_seconds": 1.6,
     "bot_count": 2
   },
